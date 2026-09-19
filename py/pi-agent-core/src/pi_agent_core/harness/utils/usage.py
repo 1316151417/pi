@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..._pi_ai.types import Usage
+from pi_ai.types import Usage
 
 __all__ = ["empty_usage", "add_usage"]
 

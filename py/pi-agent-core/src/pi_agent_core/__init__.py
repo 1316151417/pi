@@ -10,16 +10,16 @@ Mirrors the TypeScript package entry points:
 * ``pi_agent_core.cli`` — runnable demo program
 """
 
-from ._pi_ai.abort import AbortController, AbortError, AbortSignal
-from ._pi_ai.event_stream import (
+from pi_ai.abort import AbortController, AbortError, AbortSignal
+from pi_ai.event_stream import (
     AssistantMessageEventStream,
     EventStream,
     create_assistant_message_event_stream,
 )
-from ._pi_ai.json_parse import parse_json_with_repair, parse_streaming_json, repair_json
-from ._pi_ai.models import Models, Provider, calculate_cost, create_models, create_provider
-from ._pi_ai.providers.anthropic import anthropic_provider, stream_anthropic
-from ._pi_ai.providers.faux import (
+from pi_ai.json_parse import parse_json_with_repair, parse_streaming_json, repair_json
+from pi_ai.models import Models, Provider, calculate_cost, create_models, create_provider
+from pi_ai.providers.anthropic import anthropic_provider, stream_anthropic
+from pi_ai.providers.faux import (
     RegisterFauxProviderOptions,
     create_faux_core,
     faux_assistant_message,
@@ -27,8 +27,8 @@ from ._pi_ai.providers.faux import (
     faux_thinking,
     faux_tool_call,
 )
-from ._pi_ai.providers.openai_completions import openai_provider, stream_openai
-from ._pi_ai.transcript import (
+from pi_ai.providers.openai_completions import openai_provider, stream_openai
+from pi_ai.transcript import (
     create_initial_system_message,
     get_current_system_message,
     get_current_system_prompt,
@@ -37,7 +37,7 @@ from ._pi_ai.transcript import (
     normalize_context,
     to_tool_declaration,
 )
-from ._pi_ai.types import (
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     Cost,
@@ -55,9 +55,9 @@ from ._pi_ai.types import (
     Usage,
     UserMessage,
 )
-from ._pi_ai.uuid_utils import uuidv7
-from ._pi_ai.uuid_utils import uuidv7 as uuid7
-from ._pi_ai.validation import validate_tool_arguments, validate_tool_call
+from pi_ai.uuid_utils import uuidv7
+from pi_ai.uuid_utils import uuidv7 as uuid7
+from pi_ai.validation import validate_tool_arguments, validate_tool_call
 from ._chord.context import (
     BACKGROUND_CONTEXT,
     TODO_CONTEXT,

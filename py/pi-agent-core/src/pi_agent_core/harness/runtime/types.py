@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, List, Optional
 
-from ..._pi_ai.abort import AbortController, AbortSignal
+from pi_ai.abort import AbortController, AbortSignal
 from ..._chord.context import Context, without_abort_signal
 from ..compaction.compaction import CompactionSettings
 from ..execution.effect_gate import Gate, create_gate

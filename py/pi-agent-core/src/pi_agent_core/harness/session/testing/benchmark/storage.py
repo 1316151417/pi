@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Iterator, List, Optional
 
-from ....._pi_ai.types import Cost, TextContent, Usage, UserMessage
+from pi_ai.types import Cost, TextContent, Usage, UserMessage
 from ....context import BACKGROUND_CONTEXT
 from ...commit import insert_entry, insert_usage
 from ...types import EntryScan, MessageEntry, Storage, StorageBranchScan, UsageRow, Write

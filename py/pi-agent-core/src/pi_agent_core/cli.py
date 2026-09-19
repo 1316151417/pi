@@ -23,9 +23,9 @@ import time
 from typing import Any, List, Optional
 
 from . import Agent, AgentOptions, AgentInitialState, AgentTool, AgentToolResult, set_default_stream_fn
-from ._pi_ai.models import Models, create_models
-from ._pi_ai.providers.anthropic import anthropic_provider
-from ._pi_ai.providers.faux import (
+from pi_ai.models import Models, create_models
+from pi_ai.providers.anthropic import anthropic_provider
+from pi_ai.providers.faux import (
     FauxModelDefinition,
     RegisterFauxProviderOptions,
     create_faux_core,
@@ -33,8 +33,8 @@ from ._pi_ai.providers.faux import (
     faux_tool_call,
     faux_text,
 )
-from ._pi_ai.providers.openai_completions import openai_provider
-from ._pi_ai.types import (
+from pi_ai.providers.openai_completions import openai_provider
+from pi_ai.types import (
     AssistantMessage,
     TextContent,
     ThinkingContent,
@@ -83,7 +83,7 @@ def register_faux(models: Models) -> None:
     )
     handle.set_responses(list(FAUX_CHAT_SCRIPT))
 
-    from ._pi_ai.models import Provider
+    from pi_ai.models import Provider
 
     faux_provider_instance = Provider(
         id="faux",
@@ -130,12 +130,44 @@ def build_demo_tools() -> List[AgentTool]:
     ]
 
 
-def build_models(provider: str) -> Models:
+def build_models(
+    provider: str,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_id: Optional[str] = None,
+) -> Models:
+    """Assemble the Models registry for one CLI invocation.
+
+    ``--base-url`` (or ``OPENAI_BASE_URL``) re-points the OpenAI provider at any
+    OpenAI-compatible endpoint — DeepSeek, vLLM, Ollama, LM Studio and friends —
+    and lets ``--model`` name an id the built-in catalog does not know: a Model
+    is synthesized against that endpoint instead of failing resolution.
+    """
     models = create_models()
     if provider == "anthropic":
         models.set_provider(anthropic_provider())
     elif provider == "openai":
-        models.set_provider(openai_provider())
+        from pi_ai.models import ProviderAuth
+        from pi_ai.types import Model
+
+        effective_base = base_url or os.environ.get("OPENAI_BASE_URL")
+        openai = openai_provider(base_url=effective_base)
+        if api_key:
+            openai.auth = ProviderAuth(env_var="OPENAI_API_KEY", explicit_key=api_key)
+        if effective_base and model_id and model_id not in {m.id for m in openai.get_models()}:
+            openai.add_model(
+                Model(
+                    id=model_id,
+                    name=model_id,
+                    api="openai-completions",
+                    provider="openai",
+                    base_url=effective_base,
+                    input=["text"],
+                    context_window=128_000,
+                    max_tokens=8_192,
+                )
+            )
+        models.set_provider(openai)
     else:
         register_faux(models)
     return models
@@ -459,7 +491,7 @@ async def run_self_test() -> int:
         )
         handle.set_responses(list(FAUX_HARNESS_SCRIPT))
 
-        from ._pi_ai.models import Provider
+        from pi_ai.models import Provider
 
         models.set_provider(
             Provider(
@@ -503,8 +535,8 @@ async def run_self_test() -> int:
 
 async def _self_test_agent_harness_runtime() -> None:
     """Prove the durable AgentHarness runtime end to end on a JSONL session."""
-    from ._pi_ai.models import Provider
-    from ._pi_ai.providers.faux import faux_assistant_message, faux_tool_call
+    from pi_ai.models import Provider
+    from pi_ai.providers.faux import faux_assistant_message, faux_tool_call
     from .harness.agent_harness import AgentHarnessOptions, create_agent_harness
     from .harness.session.jsonl import (
         JsonlSessionCreateOptions,
@@ -585,6 +617,17 @@ async def _self_test_agent_harness_runtime() -> None:
 async def async_main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="pi-agent-core", description="pi-agent-core Python port demo")
     parser.add_argument("--provider", default="faux", choices=["faux", "anthropic", "openai"])
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="override the provider endpoint (OpenAI-compatible APIs: DeepSeek, vLLM, Ollama, ...; "
+        "also read from OPENAI_BASE_URL)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="API key for the provider (prefer the provider's environment variable in scripts)",
+    )
     parser.add_argument("--model", default=None, help="model id (defaults to the provider's first model)")
     parser.add_argument("--prompt", default=None, help="one-shot prompt; omit for interactive REPL")
     parser.add_argument("--system-prompt", default="You are a helpful assistant.")
@@ -623,7 +666,7 @@ async def async_main(argv: Optional[List[str]] = None) -> int:
     if args.self_test:
         return await run_self_test()
 
-    models = build_models(args.provider)
+    models = build_models(args.provider, base_url=args.base_url, api_key=args.api_key, model_id=args.model)
     model = resolve_model(models, args.provider, args.model)
 
     if args.provider != "faux" and not models.is_configured(args.provider):

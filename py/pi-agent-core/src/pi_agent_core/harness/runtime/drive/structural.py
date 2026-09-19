@@ -13,11 +13,12 @@ from typing import Any, List, Optional
 import time
 from typing import Awaitable, Callable
 
-from ...._pi_ai.types import AssistantMessage
+from pi_ai.types import AssistantMessage
 from ...compaction.branch_summarization import (
     BranchPreparation,
     generate_branch_summary_with_request,
 )
+from ...compaction.utils import create_file_ops
 from ...compaction.compaction import (
     CompactGenerationOptions,
     CompactionPreparation,
@@ -47,7 +48,7 @@ from ...session.values import (
     operation_preparation,
     set_value,
 )
-from ...utils.retry import is_retryable_assistant_error, retry_delay_ms
+from pi_ai.utils.retry import is_retryable_assistant_error, retry_delay_ms
 from ..transcript import committed_entry_events, read_bounded_entries
 from ..types import CommitDecision, ContinueOperationResult, FinishDecision, LaneReturn, ProcedureResult
 from .boundary import (

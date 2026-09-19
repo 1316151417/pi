@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.types import JsonValue
+from pi_ai.types import JsonValue
 from ..types import Completion, Id, Kind, ProcessStatus, Step, Task, TaskRef
 
 __all__ = [

@@ -12,16 +12,16 @@ import dataclasses
 import time
 from typing import Any, List, Optional, Sequence, Union
 
-from ._pi_ai.abort import AbortSignal
-from ._pi_ai.event_stream import EventStream
-from ._pi_ai.transcript import (
+from pi_ai.abort import AbortSignal
+from pi_ai.event_stream import EventStream
+from pi_ai.transcript import (
     ToolStateChanges,
     get_current_tools,
     get_tool_state_changes,
     to_tool_declaration,
 )
-from ._pi_ai.transcript import normalize_context
-from ._pi_ai.types import (
+from pi_ai.transcript import normalize_context
+from pi_ai.types import (
     AgentMessage,
     AssistantMessage,
     Context,
@@ -30,7 +30,7 @@ from ._pi_ai.types import (
     ToolResultMessage,
     TranscriptContext,
 )
-from ._pi_ai.validation import validate_tool_arguments
+from pi_ai.validation import validate_tool_arguments
 from .stream_fn import get_default_stream_fn
 from .types import (
     AfterToolCallContext,
@@ -851,7 +851,7 @@ async def _wrap_value(value: Any) -> Any:
 
 
 def _create_error_tool_result(message: str) -> AgentToolResult:
-    from ._pi_ai.types import TextContent
+    from pi_ai.types import TextContent
 
     return AgentToolResult(content=[TextContent(text=message)], details={})
 

@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from pi_agent_core._pi_ai.types import (
+from pi_ai.types import (
     AssistantMessage,
     TextContent,
     ToolCall as ToolCallBlock,

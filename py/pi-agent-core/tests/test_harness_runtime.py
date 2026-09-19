@@ -312,8 +312,8 @@ def test_operation_request_and_navigate_options():
 
 async def test_create_agent_harness_wires_session_and_global_config():
     """createAgentHarness attaches runtime without starting any effects."""
-    from pi_agent_core._pi_ai.models import Models
-    from pi_agent_core._pi_ai.types import Model
+    from pi_ai.models import Models
+    from pi_ai.types import Model
     from pi_agent_core.harness.session import MemorySessionRepo, SessionCreateOptions
 
     repo = MemorySessionRepo()
@@ -342,8 +342,8 @@ async def test_create_agent_harness_wires_session_and_global_config():
 
 async def test_lane_creation_is_durable_and_idempotent():
     """Lane creation writes the seed configuration exactly once."""
-    from pi_agent_core._pi_ai.models import Models
-    from pi_agent_core._pi_ai.types import Model
+    from pi_ai.models import Models
+    from pi_ai.types import Model
     from pi_agent_core.harness.session import MemorySessionRepo, SessionCreateOptions
 
     repo = MemorySessionRepo()

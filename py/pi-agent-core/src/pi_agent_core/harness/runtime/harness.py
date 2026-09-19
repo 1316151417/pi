@@ -10,7 +10,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..utils.retry import RetryPolicy
+from pi_ai.utils.retry import RetryPolicy
 from ..compaction.compaction import CompactionSettings, DEFAULT_COMPACTION_SETTINGS
 from ..config import (
     DEFAULT_RETRY_POLICY,

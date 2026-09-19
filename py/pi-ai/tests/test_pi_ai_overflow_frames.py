@@ -10,18 +10,18 @@ import json
 
 import pytest
 
-from pi_agent_core._pi_ai.assistant_message_frame import (
+from pi_ai.assistant_message_frame import (
     AssistantMessageFrame,
     AssistantMessageFrameEncoder,
     frame_from_json,
     reduce_assistant_message_frames,
 )
-from pi_agent_core._pi_ai.overflow import (
+from pi_ai.overflow import (
     get_overflow_patterns,
     is_context_overflow,
     is_recoverable_length,
 )
-from pi_agent_core._pi_ai.types import (
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     TextContent,

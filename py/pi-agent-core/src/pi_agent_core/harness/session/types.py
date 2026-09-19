@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
-from ..._pi_ai.types import AgentMessage, AssistantMessage, Usage
+from pi_ai.types import AgentMessage, AssistantMessage, Usage
 from ..._chord.context import Context
 from .values import ListElement, ListReadOptions, StoredValue, Value, ValueList
 

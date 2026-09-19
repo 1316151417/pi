@@ -8,7 +8,7 @@ import time
 import pytest
 
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT
-from pi_agent_core._pi_ai.types import TextContent, UserMessage, Usage
+from pi_ai.types import TextContent, UserMessage, Usage
 from pi_agent_core.harness.session import (
     BranchScan,
     EntryQuery,
@@ -89,7 +89,7 @@ async def test_branch_from_existing_entry_forks_history():
 
 
 async def test_pending_assistant_message_rejected():
-    from pi_agent_core._pi_ai.types import AssistantMessage
+    from pi_ai.types import AssistantMessage
 
     repo = MemorySessionRepo()
     session = await repo.create(None, BACKGROUND_CONTEXT)

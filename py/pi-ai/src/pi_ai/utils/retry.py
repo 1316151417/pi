@@ -7,8 +7,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
-from ..._pi_ai.abort import AbortSignal
-from ..._pi_ai.types import AssistantMessage
+from pi_ai.abort import AbortSignal
+from pi_ai.types import AssistantMessage
 
 __all__ = [
     "RetryPolicy",

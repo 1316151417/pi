@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Set as AbstractSet, TypeVar, Union
 
-from ._pi_ai.abort import AbortSignal
-from ._pi_ai.types import (
+from pi_ai.abort import AbortSignal
+from pi_ai.types import (
     AgentMessage,
     AssistantMessage,
     AssistantMessageEvent,

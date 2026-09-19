@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Sequence
 
-from ...._pi_ai.types import UserMessage  # noqa: F401  (re-exported for callers)
+from pi_ai.types import UserMessage  # noqa: F401  (re-exported for callers)
 from ...result import Result  # noqa: F401  (keeps the error import graph stable)
 from ...session.commit import insert_entry
 from ...session.session import SessionInvariantError

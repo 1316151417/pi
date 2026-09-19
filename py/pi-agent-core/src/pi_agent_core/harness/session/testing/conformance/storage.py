@@ -18,7 +18,7 @@ import asyncio
 import sys
 from typing import Any, Awaitable, Callable, List, Optional
 
-from ....._pi_ai.types import Cost, TextContent, Usage, UserMessage
+from pi_ai.types import Cost, TextContent, Usage, UserMessage
 from ....context import BACKGROUND_CONTEXT
 from ...commit import insert_entry, insert_usage, materialize_committed_entry
 from ...types import (

@@ -8,7 +8,7 @@ import time
 import pytest
 
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT
-from pi_agent_core._pi_ai.types import (
+from pi_ai.types import (
     AssistantMessage,
     Cost,
     Model,

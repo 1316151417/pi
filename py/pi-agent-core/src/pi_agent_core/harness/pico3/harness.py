@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Union
 
 from ..._chord.context import Context, with_abort_signal
-from ..._pi_ai.abort import AbortSignal
-from ..._pi_ai.types import JsonObject, JsonValue
+from pi_ai.abort import AbortSignal
+from pi_ai.types import JsonObject, JsonValue
 from .hooks import HookRegistration, create_hook_runners
 from .kinds.collapse import collapse, collapse_kind, choose_through
 from .kinds.entries import entries as builtin_entries

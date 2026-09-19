@@ -13,7 +13,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, List, Optional, Union
 
-from .._pi_ai.types import AssistantMessage, JsonObject, ToolResultMessage, Usage
+from pi_ai.types import AssistantMessage, JsonObject, ToolResultMessage, Usage
 from .session.types import LaneConfiguration, SessionStats, UsageRow
 from .utils.usage import empty_usage
 

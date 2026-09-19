@@ -147,7 +147,7 @@ def _entry_from_json(value: dict) -> Any:
         CustomEntry,
         MessageEntry,
     )
-    from ...._pi_ai.types import message_from_json
+    from pi_ai.types import message_from_json
 
     entry_data = value
     if entry_data.get("type") == "message" or "message" in entry_data:
@@ -194,7 +194,7 @@ def _entry_from_json(value: dict) -> Any:
 
 
 def _usage_row_from_json(value: dict) -> Any:
-    from ...._pi_ai.types import usage_from_json
+    from pi_ai.types import usage_from_json
     from ..types import UsageRow
 
     row = value.get("row") if isinstance(value.get("row"), dict) else value
@@ -209,7 +209,7 @@ def _usage_row_from_json(value: dict) -> Any:
 
 
 def _empty_usage():
-    from ...._pi_ai.types import Usage
+    from pi_ai.types import Usage
 
     return Usage()
 

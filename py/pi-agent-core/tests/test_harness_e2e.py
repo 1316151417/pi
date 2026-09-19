@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT
-from pi_agent_core._pi_ai.models import Provider, create_models
-from pi_agent_core._pi_ai.providers.faux import (
+from pi_ai.models import Provider, create_models
+from pi_ai.providers.faux import (
     RegisterFauxProviderOptions,
     create_faux_core,
     faux_assistant_message,
@@ -248,7 +248,7 @@ def workdir():
 
 async def test_tool_batch_runs_to_completion_and_places_results(workdir):
     """A tool-calling turn executes tools, places results, then finishes."""
-    from pi_agent_core._pi_ai.providers.faux import faux_tool_call
+    from pi_ai.providers.faux import faux_tool_call
     from pi_agent_core.harness.env.local import create_local_execution_env
     from pi_agent_core.harness.tool_adapter import (
         StaticToolContext,
@@ -301,7 +301,7 @@ async def test_tool_batch_survives_a_reopen_mid_operation(workdir):
     """Tool arguments are staged durably, so a reopen restores the same batch."""
     import os
 
-    from pi_agent_core._pi_ai.providers.faux import faux_tool_call
+    from pi_ai.providers.faux import faux_tool_call
     from pi_agent_core.harness.env.local import create_local_execution_env
     from pi_agent_core.harness.session.jsonl import (
         JsonlSessionCreateOptions,
@@ -373,11 +373,11 @@ async def test_suspended_run_is_reported_as_an_open_operation_on_reopen(workdir)
     """A deferred run suspends durably, and reopen reports it as a resumable operation."""
     import os
 
-    from pi_agent_core._pi_ai.providers.faux import (
+    from pi_ai.providers.faux import (
         RegisterFauxProviderOptions,
         create_faux_core,
     )
-    from pi_agent_core._pi_ai.models import Provider, create_models
+    from pi_ai.models import Provider, create_models
     from pi_agent_core.harness.env.local import create_local_execution_env
     from pi_agent_core.harness.session.jsonl import (
         JsonlSessionCreateOptions,
@@ -477,97 +477,140 @@ async def test_suspended_run_is_reported_as_an_open_operation_on_reopen(workdir)
     await second["harness"].close(BACKGROUND_CONTEXT)
 
 
-async def test_lane_snapshot_mid_stream_reduces_the_committed_frame_prefix():
-    """A snapshot taken while a response streams reports the reduced partial message.
+async def test_assistant_frames_are_committed_while_the_response_streams():
+    """The live assistant-frame channel writes to the durable list.
 
-    This is the only path that reaches the frame reducer from the lane, so it is
-    the one that catches a stale import or a broken frame write.
+    This guards the whole progress path: a stale import inside the channel used
+    to fail every write silently, leaving the operation with no bounded frame
+    prefix to recover from. The provider stream is gated on the test, so the
+    operation is held in ``assistant.effect_pending`` while the assertions run —
+    no timing race.
     """
-    from pi_agent_core._pi_ai.models import Provider, create_models
-    from pi_agent_core._pi_ai.providers.faux import (
-        RegisterFauxProviderOptions,
-        create_faux_core,
+    from pi_ai.event_stream import create_assistant_message_event_stream
+    from pi_ai.models import Provider, create_models
+    from pi_ai.types import AssistantMessage, AssistantMessageEvent, Model, TextContent, Usage
+    from pi_agent_core.harness.runtime.progress import open_frame_progress
+    from pi_agent_core.harness.session.values import ListReadOptions, pending_assistant_frames
+
+    at_first_delta = asyncio.Event()
+    release = asyncio.Event()
+    partial = AssistantMessage(
+        content=[], api="gated", provider="gated", model="gated", usage=Usage()
     )
 
-    # Slow streaming keeps the operation in assistant.effect_pending long enough
-    # to snapshot it repeatedly, and frames are committed as the deltas arrive.
-    handle, functions = create_faux_core(
-        RegisterFauxProviderOptions(
-            provider="faux",
-            api="faux",
-            tokens_per_second=30,
-            token_size={"min": 1, "max": 1},
-        )
+    def _gated_stream(_model, _context, _options):
+        stream = create_assistant_message_event_stream()
+
+        async def _run():
+            def _emit(kind, **fields):
+                stream.push(AssistantMessageEvent(type=kind, partial=partial, **fields))
+
+            _emit("start")
+            partial.content.append(TextContent(text=""))
+            _emit("text_start", content_index=0)
+            partial.content[0].text += "alpha "
+            _emit("text_delta", content_index=0, delta="alpha ")
+            at_first_delta.set()
+            await release.wait()
+            _emit("text_end", content_index=0, content=partial.content[0].text)
+            partial.stop_reason = "stop"
+            _emit("done", reason="stop", message=partial)
+            stream.end(partial)
+
+        asyncio.get_running_loop().create_task(_run())
+        return stream
+
+    model = Model(
+        id="gated",
+        name="gated",
+        api="gated",
+        provider="gated",
+        base_url="",
+        input=["text"],
+        # A realistic window: a tiny one would trip threshold compaction and send
+        # this test down the summarization path instead of the frame path.
+        context_window=200_000,
+        max_tokens=8_192,
     )
     models = create_models()
     models.set_provider(
         Provider(
-            id="faux",
-            name="Faux",
-            models=handle.models,
-            stream=functions["stream"],
-            stream_simple=functions["stream_simple"],
+            id="gated",
+            name="Gated",
+            models=[model],
+            stream=_gated_stream,
+            stream_simple=_gated_stream,
         )
     )
     repo = MemorySessionRepo()
-    session = await repo.create(SessionCreateOptions(id="mid"), BACKGROUND_CONTEXT)
+    session = await repo.create(SessionCreateOptions(id="gate"), BACKGROUND_CONTEXT)
     created = await create_agent_harness(
-        AgentHarnessOptions(
-            session=session,
-            models=models,
-            model=handle.get_model(),
-            thinking_level="off",
-        ),
+        AgentHarnessOptions(session=session, models=models, model=model, thinking_level="off"),
         BACKGROUND_CONTEXT,
     )
     harness = created["harness"]
     lane = await _lane(harness)
-    final_text = "alpha bravo charlie delta echo foxtrot"
-    handle.set_responses([faux_assistant_message(final_text)])
 
-    observed: list = []
-    stop = False
+    prompt_task = asyncio.ensure_future(lane.prompt("hi", BACKGROUND_CONTEXT))
+    await asyncio.wait_for(at_first_delta.wait(), 10)
 
-    async def _sample():
-        while not stop:
-            await asyncio.sleep(0.005)
-            snapshot = await lane.watch(BACKGROUND_CONTEXT)
-            operation = snapshot.snapshot["operation"]
-            snapshot.unsubscribe()
-            if operation is None:
-                continue
-            partial = operation.get("streamingMessage")
-            if partial is not None:
-                observed.append(partial)
+    operation = lane.state.operation
+    assert operation is not None
+    assert operation.state.at == "assistant.effect_pending"
+    response_entry_id = operation.state.response_entry_id
+    address = pending_assistant_frames(operation.meta.operation_id, response_entry_id)
 
-    sampler = asyncio.ensure_future(_sample())
-    prompt_result = await lane.prompt("hi", BACKGROUND_CONTEXT)
-    stop = True
-    await sampler
+    async def _committed(minimum: int, deadline_seconds: float = 5.0) -> list:
+        # The channel writes through the lane's serialized command line, so a
+        # frame lands a few scheduling turns after the observer pushes it. The
+        # gate keeps the stream open, so waiting costs nothing but loop time.
+        import time as _time
 
+        deadline = _time.monotonic() + deadline_seconds
+        page: list = []
+        while _time.monotonic() < deadline:
+            page = await session.read_list(
+                address, ListReadOptions(limit=1000), BACKGROUND_CONTEXT
+            )
+            if len(page) >= minimum:
+                break
+            await asyncio.sleep(0.001)
+        return [element.value for element in page]
+
+    # The regression this guards produced *zero* durable frames, so any committed
+    # prefix proves the channel works. Requiring a specific count would couple the
+    # test to scheduler timing for no extra coverage.
+    frames = await _committed(2)
+    types = [frame.type for frame in frames]
+    assert types, "no assistant frame was committed while the response streamed"
+    assert types[0] == "start"
+    assert "text_start" in types
+
+    # A snapshot taken on this state reduces the committed prefix.
+    snapshot = await lane.watch(BACKGROUND_CONTEXT)
+    streaming = snapshot.snapshot["operation"]["streamingMessage"]
+    snapshot.unsubscribe()
+    assert streaming is not None
+    text = "".join(
+        block.text for block in streaming.content if getattr(block, "type", None) == "text"
+    )
+    assert text == "alpha "
+
+    # Writing through the same public channel appends one more durable frame.
+    drive = lane.active_drive
+    assert drive is not None
+    channel = open_frame_progress(lane, drive, response_entry_id)
+    channel.seal()
+    await channel.drain()
+
+    release.set()
+    prompt_result = await asyncio.wait_for(prompt_task, 10)
     assert prompt_result.ok, getattr(prompt_result, "error", None)
-    # Frames must actually reach the durable list; without them the operation has
-    # no bounded prefix to recover from after a crash.
-    assert observed, "never observed a mid-stream operation snapshot"
-
-    def _text(message) -> str:
-        return "".join(
-            block.text
-            for block in message.content
-            if getattr(block, "type", None) == "text"
-        )
-
-    texts = [_text(message) for message in observed]
-    assert all(message.role == "assistant" for message in observed)
-    assert any(text for text in texts), f"no partial ever carried text: {texts[:5]}"
-    # Every partial is a committed prefix of the eventual response, and the
-    # prefix grows as deltas land.
-    for text in texts:
-        assert final_text.startswith(text), (text, final_text)
-    assert max(len(text) for text in texts) < len(final_text), "streaming was not observed mid-flight"
-
-    # The final committed entry is the whole response, not a sampled prefix.
     entries = await lane.find_entries(None, BACKGROUND_CONTEXT)
-    assert entries[0].message.role == "assistant"
-    assert _text(entries[0].message) == final_text
+    committed = "".join(
+        block.text
+        for block in entries[0].message.content
+        if getattr(block, "type", None) == "text"
+    )
+    assert committed == "alpha "
     await harness.close(BACKGROUND_CONTEXT)

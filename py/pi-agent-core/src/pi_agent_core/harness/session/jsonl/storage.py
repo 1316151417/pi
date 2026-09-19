@@ -13,7 +13,7 @@ import json
 from typing import Any, Callable, List, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.uuid_utils import uuidv7
+from pi_ai.uuid_utils import uuidv7
 from ...types import FileSystem
 from ..commit import CommittedWrite, insert_usage
 from ..in_memory_storage_state import InMemoryStorageState

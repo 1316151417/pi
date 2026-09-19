@@ -12,7 +12,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Generic, Optional, TypeVar
 
-from .._pi_ai.abort import AbortSignal
+from pi_ai.abort import AbortSignal
 
 __all__ = [
     "ContextKey",

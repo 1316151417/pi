@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, List, Optional
 
 from ..._chord.context import Context, with_abort_signal
-from ..._pi_ai.types import TextContent, ToolResultMessage
-from ..._pi_ai.validation import ValidationError, validate_tool_arguments
+from pi_ai.types import TextContent, ToolResultMessage
+from pi_ai.validation import ValidationError, validate_tool_arguments
 from ..types import AgentHarnessTool, AgentHarnessToolInvocation, AgentHarnessToolUpdateCallback
 
 __all__ = [

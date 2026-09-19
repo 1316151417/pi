@@ -17,6 +17,11 @@ import httpx
 from ..event_stream import AssistantMessageEventStream, create_assistant_message_event_stream
 from ..models import Provider, calculate_cost, create_provider
 from ..transcript import collapse_system_messages, get_current_system_prompt, get_current_tools
+from ..utils.provider_retry import (
+    ProviderHttpError,
+    ProviderRetryAborted,
+    retry_provider_request,
+)
 from ..types import (
     AssistantMessage,
     AssistantMessageEvent,
@@ -161,7 +166,8 @@ def build_openai_payload(
         "model": model.id,
         "stream": True,
         "stream_options": {"include_usage": True},
-        "messages": _build_messages(collapsed),
+        # Mirrors the TS rule: only reasoning models get the "developer" instruction role.
+        "messages": _build_messages(collapsed, supports_developer_role=bool(model.reasoning)),
     }
 
     max_tokens = options.max_tokens if options and options.max_tokens else model.max_tokens
@@ -194,6 +200,50 @@ def build_openai_payload(
 
 
 _FINISH_MAP = {"stop": "stop", "length": "length", "tool_calls": "toolUse", "function_call": "toolUse"}
+
+
+def _http_timeout(options: Any) -> Any:
+    """Per-attempt transport timeout; ``None`` keeps httpx from defaulting to 5s.
+
+    Long generations must not be cut off by httpx's own default, so an absent
+    ``timeoutMs`` means no client-side limit and the request AbortSignal is the
+    only cancellation path.
+    """
+    if options is None:
+        return None
+    timeout_ms = getattr(options, "timeout_ms", None)
+    return None if timeout_ms is None else max(0.001, timeout_ms / 1000)
+
+
+def _max_retries(options: Any) -> int:
+    if options is None:
+        return 0
+    value = getattr(options, "max_retries", None)
+    return int(value) if value else 0
+
+
+def _max_retry_delay_ms(options: Any) -> Any:
+    return None if options is None else getattr(options, "max_retry_delay_ms", None)
+
+
+def _is_retryable_status(status: int, headers: dict) -> bool:
+    """Whether a failed attempt is worth retrying, per the shared provider policy."""
+    from ..utils.provider_retry import is_retryable_provider_error
+
+    return is_retryable_provider_error(
+        ProviderHttpError(
+            status=status, headers={k.lower(): v for k, v in headers.items()}, message=""
+        )
+    )
+
+
+class _NonRetryableResponse(Exception):
+    """A failed attempt the retry policy rejects; carries the status and body."""
+
+    def __init__(self, status: int, body: str) -> None:
+        super().__init__(f"OpenAI API error {status}: {body[:2000]}")
+        self.status = status
+        self.body = body
 
 
 def stream_openai(
@@ -291,25 +341,67 @@ def stream_openai(
             "accept": "text/event-stream",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
-                    "POST",
-                    f"{model.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                ) as response:
-                    if options and options.on_response:
-                        awaitable = options.on_response(
-                            {"status": response.status_code, "headers": dict(response.headers)}, model
-                        )
-                        if asyncio.iscoroutine(awaitable):
-                            await awaitable
-                    if response.status_code >= 400:
-                        body = (await response.aread()).decode("utf-8", "replace")
-                        _finish("error", f"OpenAI API error {response.status_code}: {body[:2000]}")
-                        return
+        client = httpx.AsyncClient(timeout=_http_timeout(options))
+        open_stream = None
 
+        async def _close_stream() -> None:
+            nonlocal open_stream
+            context, open_stream = open_stream, None
+            if context is not None:
+                await context.__aexit__(None, None, None)
+
+        async def _open_attempt() -> Any:
+            """Open one attempt and validate its status inside the retry window."""
+            nonlocal open_stream
+            open_stream = client.stream(
+                "POST",
+                f"{model.base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            response = await open_stream.__aenter__()
+            if options and options.on_response:
+                awaitable = options.on_response(
+                    {"status": response.status_code, "headers": dict(response.headers)}, model
+                )
+                if asyncio.iscoroutine(awaitable):
+                    await awaitable
+            if response.status_code >= 400:
+                body_text = (await response.aread()).decode("utf-8", "replace")
+                await _close_stream()
+                if not _is_retryable_status(response.status_code, dict(response.headers)):
+                    raise _NonRetryableResponse(response.status_code, body_text)
+                raise ProviderHttpError(
+                    status=response.status_code,
+                    headers={k.lower(): v for k, v in dict(response.headers).items()},
+                    message=f"OpenAI API error {response.status_code}: {body_text[:2000]}",
+                )
+            return response
+
+        try:
+            try:
+                response = await retry_provider_request(
+                    _open_attempt,
+                    max_retries=_max_retries(options),
+                    max_retry_delay_ms=_max_retry_delay_ms(options),
+                    signal=options.signal if options else None,
+                )
+            except _NonRetryableResponse as error:
+                _finish("error", str(error))
+                return
+            except ProviderRetryAborted:
+                _finish("aborted", "Request was aborted")
+                return
+            except ProviderHttpError as error:
+                _finish("error", error.message)
+                return
+            except httpx.HTTPError as error:
+                if options and options.signal and options.signal.aborted:
+                    _finish("aborted", "Request was aborted")
+                else:
+                    _finish("error", f"OpenAI request failed: {error}")
+                return
+            try:
                     async for chunk in response.aiter_text():
                         if options and options.signal and options.signal.aborted:
                             _finish("aborted", "Request was aborted")
@@ -427,6 +519,9 @@ def stream_openai(
                         _finish(stop_reason)
                     else:
                         _finish("error", "OpenAI stream ended without a message")
+            finally:
+                await _close_stream()
+                await client.aclose()
         except Exception as error:  # noqa: BLE001 - encode in stream like TS
             _finish("error", str(error))
 

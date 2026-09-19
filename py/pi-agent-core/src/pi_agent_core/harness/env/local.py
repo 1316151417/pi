@@ -20,7 +20,7 @@ from pathlib import Path, PurePath
 from typing import Any, List, Optional
 
 from ..._chord.context import Context
-from ..._pi_ai.types import JsonObject
+from pi_ai.types import JsonObject
 from ..result import Result, err, ok
 from ..types import (
     ExecutionError,

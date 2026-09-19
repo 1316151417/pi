@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional
 
-from ...._pi_ai.types import TextContent, ToolResultMessage
+from pi_ai.types import TextContent, ToolResultMessage
 from ....types import AgentToolCall, AgentToolResult
 from ...execution.effect_gate import AbortRequested
 from ...execution.tools import (

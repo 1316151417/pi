@@ -286,7 +286,7 @@ def test_lane_configuration_survives_a_jsonl_replay():
 
 def test_usage_row_wire_shape_is_flat_and_camel_case():
     """A usage row serializes with the exact keys the TypeScript writer emits."""
-    from pi_agent_core._pi_ai.types import Usage
+    from pi_ai.types import Usage
 
     row = UsageRow(
         id="u1", usage=Usage(input=3, output=4, total_tokens=7), entry_id="e1", seq=9
@@ -490,6 +490,6 @@ def test_committed_write_wire_shapes_match_the_typescript_writers():
 
 
 def _usage():
-    from pi_agent_core._pi_ai.types import Usage
+    from pi_ai.types import Usage
 
     return Usage(input=1, output=2, total_tokens=3)

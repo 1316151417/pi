@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ..._chord.context import Context, await_with_context
-from ..._pi_ai.types import AgentMessage, ImageContent, Usage
+from pi_ai.types import AgentMessage, ImageContent, Usage
 from ..compaction.branch_summarization import BranchPreparation, prepare_branch_entries
 from ..compaction.compaction import prepare_compaction
 from ..execution.tools import tool_result_from_message
@@ -2245,14 +2245,14 @@ def _text_blocks(text: str) -> List[Any]:
 
 
 def _text_block(text: str) -> Any:
-    from ..._pi_ai.types import TextContent
+    from pi_ai.types import TextContent
 
     return TextContent(text=text)
 
 
 def _user_message(leading: List[Any], images: List[Any], timestamp: int) -> Any:
     """Build one user message from already-built leading blocks plus image blocks."""
-    from ..._pi_ai.types import UserMessage
+    from pi_ai.types import UserMessage
 
     return UserMessage(content=[*leading, *images], timestamp=timestamp)
 
@@ -2331,7 +2331,7 @@ def _index_of(entries: List[Any], entry_id: str) -> int:
 
 
 def _reduce_frames(frames: List[Any]) -> Any:
-    from ..._pi_ai.assistant_message_frame import reduce_assistant_message_frames
+    from pi_ai.assistant_message_frame import reduce_assistant_message_frames
 
     return reduce_assistant_message_frames(frames)
 

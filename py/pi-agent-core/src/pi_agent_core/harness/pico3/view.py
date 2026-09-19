@@ -16,7 +16,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Set
 
-from ..._pi_ai.types import JsonObject, JsonValue
+from pi_ai.types import JsonObject, JsonValue
 from .delta import Op, apply_immutable, track
 from .session import CommitChanges, CommitResult
 from .types import (

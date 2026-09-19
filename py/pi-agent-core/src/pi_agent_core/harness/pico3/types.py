@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
 from ..._chord.context import Context
-from ..._pi_ai.types import (
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     DeferredHandle,

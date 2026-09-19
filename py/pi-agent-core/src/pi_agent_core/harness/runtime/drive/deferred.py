@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
-from ...._pi_ai.types import DeferredHandle
+from pi_ai.types import DeferredHandle
 from ...context import get_telemetry_context, with_abort_signal
 from ...execution.assistant import consume_assistant_stream
 from ...hooks import apply_stream_options_patch

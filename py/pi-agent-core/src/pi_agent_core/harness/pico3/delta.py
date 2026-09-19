@@ -21,7 +21,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-from ..._pi_ai.types import JsonValue
+from pi_ai.types import JsonValue
 
 __all__ = [
     "Seg",

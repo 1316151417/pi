@@ -7,7 +7,7 @@ import math
 import time
 from typing import Any, Callable, Optional
 
-from ..._pi_ai.types import TextContent
+from pi_ai.types import TextContent
 from ...types import AgentToolResult
 from ..._chord.context import Context
 from ..types import (

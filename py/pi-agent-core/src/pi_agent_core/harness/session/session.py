@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from ..._pi_ai.uuid_utils import uuidv7
+from pi_ai.uuid_utils import uuidv7
 from ..._chord.context import Context
 from .commit import insert_entry
 from .mutation_line import MutationLine

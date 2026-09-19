@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
 from ..._chord.context import Context
-from ..._pi_ai.types import JsonObject
+from pi_ai.types import JsonObject
 from .harness import ConversationHandle as PicoConversationHandle, Harness as PicoHarness
 from .session import CommitResult
 from .types import (

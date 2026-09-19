@@ -15,10 +15,10 @@ from typing import Any, List, Optional
 
 import httpx
 
-from ._pi_ai.abort import AbortSignal
-from ._pi_ai.event_stream import EventStream
-from ._pi_ai.json_parse import parse_streaming_json
-from ._pi_ai.types import (
+from pi_ai.abort import AbortSignal
+from pi_ai.event_stream import EventStream
+from pi_ai.json_parse import parse_streaming_json
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     Cost,
@@ -342,6 +342,6 @@ def _assign(partial: AssistantMessage, index: int, block: Any) -> None:
 
 
 def _usage_from_json(data: Optional[dict]) -> Usage:
-    from ._pi_ai.types import usage_from_json
+    from pi_ai.types import usage_from_json
 
     return usage_from_json(data) or Usage(cost=Cost())

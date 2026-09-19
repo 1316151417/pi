@@ -16,7 +16,7 @@ from typing import Awaitable, Callable, List, Optional
 
 import pytest
 
-from pi_agent_core._pi_ai.types import TextContent, UserMessage
+from pi_ai.types import TextContent, UserMessage
 from pi_agent_core.harness.context import BACKGROUND_CONTEXT as CTX
 from pi_agent_core.harness.env.local import create_local_execution_env
 from pi_agent_core.harness.session.commit import insert_entry

@@ -9,8 +9,8 @@ import os
 import pytest
 
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT
-from pi_agent_core._pi_ai.json_parse import parse_json_with_repair, parse_streaming_json, repair_json
-from pi_agent_core._pi_ai.types import AssistantMessage, TextContent, ToolCall, Usage, Cost
+from pi_ai.json_parse import parse_json_with_repair, parse_streaming_json, repair_json
+from pi_ai.types import AssistantMessage, TextContent, ToolCall, Usage, Cost
 from pi_agent_core.harness.env.local import create_local_execution_env
 from pi_agent_core.harness.prompt_templates import (
     PromptTemplate,
@@ -141,7 +141,7 @@ def test_process_proxy_event_type_mismatch_raises():
 
 async def test_stream_proxy_reports_connection_errors():
     # No server listening: the stream must surface a terminal error event.
-    from pi_agent_core._pi_ai.transcript import TranscriptContext
+    from pi_ai.transcript import TranscriptContext
 
     stream = stream_proxy(
         type("M", (), {"id": "m", "api": "faux", "provider": "faux", "name": "m", "base_url": "", "reasoning": False, "input": [], "cost": Cost(), "context_window": 0, "max_tokens": 0})(),

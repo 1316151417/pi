@@ -4,6 +4,17 @@ Python 复刻版 of [`@earendil-works/pi-agent-core`](../../../packages/agent)�
 
 Stateful agent with tool execution and event streaming：拥有会话转录、生命周期事件流、工具执行（串行/并行）、steering / follow-up 队列，以及可插拔的 LLM provider 层。此外完整移植了 `harness/**`：持久化 lane 运行时（`AgentHarness`）、JSONL 会话存储、压缩/分支摘要、事件总线与钩子注册表。
 
+## 仓库结构
+
+```
+py/
+├── pi-ai/           ← 本 port 依赖的 LLM 层（pi-ai 的依赖面，非全量复刻）
+└── pi-agent-core/   ← 本包：agent 循环 + harness 运行时 + 标准工具库
+```
+
+`pi-agent-core` 通过 `[tool.uv.sources]` 以 **editable 路径**依赖 `../pi-ai`，因此
+`pi-ai` 的源码改动立刻生效，不需要重新安装。两个包各自独立 `uv sync` / `uv run pytest`。
+
 ## 安装（uv）
 
 本项目用 [uv](https://docs.astral.sh/uv/) 管理：依赖声明在 `pyproject.toml`，解析结果锁在 `uv.lock`，
@@ -111,6 +122,33 @@ uv run pi-agent-core --provider anthropic --model claude-sonnet-4-5 --thinking h
 uv run pi-agent-core --tools none             # 无工具对话
 ```
 
+### 接 OpenAI 兼容 API（DeepSeek / vLLM / Ollama / GLM / Qwen…）
+
+凡是说 OpenAI chat-completions 协议的端点都能接：`--base-url` 指过去，`--model` 随便起名，
+不在内置目录里也会自动注册。以 DeepSeek 为例：
+
+```bash
+export DEEPSEEK_API_KEY=sk-...
+
+uv run pi-agent-core --provider openai \
+  --base-url https://api.deepseek.com \
+  --api-key "$DEEPSEEK_API_KEY" \
+  --model deepseek-chat \
+  --prompt "你好"
+
+# 也可以全用环境变量（OPENAI_BASE_URL 是 --base-url 的环境变量写法）
+export OPENAI_API_KEY="$DEEPSEEK_API_KEY" OPENAI_BASE_URL=https://api.deepseek.com
+uv run pi-agent-core --provider openai --model deepseek-reasoner
+
+# 配合持久化 harness 运行时
+uv run pi-agent-core --provider openai --base-url https://api.deepseek.com \
+  --model deepseek-chat --runtime harness --session ds1
+```
+
+本地模型同理：vLLM（`--base-url http://localhost:8000/v1`）、Ollama（`--base-url http://localhost:11434/v1`）。
+`tests/test_custom_openai_endpoint.py` 用本地 SSE mock 服务端到端验证了这条通路（含鉴权头、流式增量、usage 统计），
+不依赖真实网络。
+
 两种运行时（`--runtime`）：
 
 | 运行时 | 说明 |
@@ -138,8 +176,8 @@ uv run pi-agent-core --runtime harness --resume --prompt "keep going"
 ```python
 import asyncio
 from pi_agent_core import Agent, AgentOptions, AgentInitialState
-from pi_agent_core._pi_ai.models import create_models
-from pi_agent_core._pi_ai.providers.anthropic import anthropic_provider
+from pi_ai.models import create_models
+from pi_ai.providers.anthropic import anthropic_provider
 
 models = create_models()
 models.set_provider(anthropic_provider())
@@ -168,8 +206,8 @@ asyncio.run(main())
 ```python
 import asyncio
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT
-from pi_agent_core._pi_ai.models import create_models
-from pi_agent_core._pi_ai.providers.anthropic import anthropic_provider
+from pi_ai.models import create_models
+from pi_ai.providers.anthropic import anthropic_provider
 from pi_agent_core.harness.agent_harness import AgentHarnessOptions, create_agent_harness
 from pi_agent_core.harness.env.local import create_local_execution_env
 from pi_agent_core.harness.session.jsonl import (
@@ -259,8 +297,8 @@ asyncio.run(main())
 | `src/agent-loop.ts` | `pi_agent_core/agent_loop.py` |
 | `src/stream-fn.ts` | `pi_agent_core/stream_fn.py` |
 | `src/proxy.ts` | `pi_agent_core/proxy.py` |
-| `@earendil-works/pi-ai`（types/models/utils） | `pi_agent_core/_pi_ai/`（types, models, event_stream, transcript, assistant_message_frame, overflow, text, validation, json_parse, uuid_utils, abort） |
-| `pi-ai providers`（faux / anthropic / openai-completions） | `pi_agent_core/_pi_ai/providers/` |
+| `@earendil-works/pi-ai`（types/models/utils） | 独立包 [`py/pi-ai`](../pi-ai) → `pi_ai/`（types, models, event_stream, transcript, assistant_message_frame, overflow, text, validation, json_parse, uuid_utils, abort, utils/） |
+| `pi-ai providers`（faux / anthropic / openai-completions） | [`py/pi-ai`](../pi-ai) → `pi_ai/providers/` |
 | `harness/agent-harness.ts` | `harness/agent_harness.py` |
 | `harness/runtime/lane.ts` | `harness/runtime/lane.py` |
 | `harness/runtime/harness.ts` | `harness/runtime/harness.py` |
@@ -281,7 +319,7 @@ cd py/pi-agent-core
 uv run pytest -q
 ```
 
-当前 **410 passed**（18 个测试文件）。覆盖：
+当前 **396 passed**（18 个测试文件）。覆盖：
 
 - `test_agent.py` / `test_agent_loop.py`：agent loop 事件序列、transformContext → convertToLlm 管道、工具校验/prepareArguments/before/afterToolCall、并行工具完成顺序与源序持久化、length 截断工具调用的失败处理、steering/follow-up 队列、错误与中止、工具增删声明
 - `test_harness_runtime.py`：事件总线投递顺序与失败隔离、lane 恢复、`AgentHarness.create` 装配、lane 创建的幂等与持久化
@@ -289,7 +327,8 @@ uv run pytest -q
 - `test_harness_session_testing.py`：**一致性套件**——53 个来自 TS `harness/session/testing/**` 的一致性用例，各自在内存与 JSONL 两种后端上各跑一遍（共 106 个参数化测试），覆盖存储契约、会话仓库契约与流式 fork
 - `test_harness_jsonl*.py`：JSONL 事务序列化/回放/撕裂行修复、仓库 create/list/open/delete/fork、legacy v3 迁移
 - `test_harness_compaction.py`、`test_harness_tools.py`、`test_harness_skills.py`、`test_harness_hooks.py`、`test_harness_misc.py`
-- `test_harness_runtime_tools.py`、`test_pi_ai_overflow_frames.py`：工具批过程与 pi-ai 溢流检测/帧编码
+- `test_harness_runtime_tools.py`：工具批过程与结果安置
+- `test_custom_openai_endpoint.py`：OpenAI 兼容端点通路（本地 SSE mock，不触网）
 - `test_harness_durable_roundtrip.py`：**durable 值回放保真与跨实现互操作**——13 个 operation 状态叶子 + `OperationMeta`/`OperationIntent` + pending entry + usage row，全部经真实 JSONL 线格式序列化再经真实 reviver 读回，断言复原结果与写入对象相等、且嵌套的 `LaneConfiguration` 仍是 dataclass；另含**读方向互操作**与 **committed write 线格式**测试：用手写的 TS 版线格式行（扁平 entry/usage、`set`/`delete` value、durable operation state、多笔事务）验证 Python 能原样解析，并对 6 种 committed write 逐一断言键集与 TS 声明完全一致（`delete` 无 payload 键、`set`/`append` 必有）
 - `test_harness_pico3.py`：pico3 的行为测试 49 项——`Session`/`TxImpl` 的能力校验、作用域、读后写 poison 与 abort 路径，一次走完整 scheduler 的真实回合（generation → tool → post_tools → successor），以及存储提交/回放/撕裂尾修复、文档折叠与 `doc_as_of`、追踪文档 op、view 信封与 head-cut splice、钩子过滤、系统段落折叠、frame 应用、job/plugin kind 阶段与中止
 
@@ -303,13 +342,13 @@ uv run pytest -q
 | --- | --- | --- |
 | 模块 | **116 / 116 (100%)** | `packages/agent/src` 下每个 TS 模块都有 Python 对位模块 |
 | 代码行 | **33,353 / 33,353 (100%)** | |
-| Python 侧 | 146 文件 / 约 49,400 行 | 测试 18 文件 / 约 9,600 行 |
+| Python 侧 | 148 文件 / 约 49,900 行（本包 129 + [`pi-ai`](../pi-ai) 19） | 测试 20 文件 / 约 10,400 行 |
 
 计数口径：TypeScript 模块含 barrel（`index.ts`）与类型文件；Python 侧以对应包
 `__init__.py` 的 `__all__` 表达 barrel，以 `harness/types.py` 表达纯类型文件，
 `harness/env/nodejs.ts` 由同一职责的 `harness/env/local.py` 对位。
 
-**边界情况**：`packages/ai/src`（独立的 provider 库，约 55K 行）只移植了本 port 依赖面上的部分（`types`、`models`、`event-stream`、`transcript`、`assistant-message-frame`、`overflow`、`validation`、`text`、`abort`、`uuid`，以及 faux / anthropic / openai-completions 三个 provider）。其余 pi-ai provider 与 API 实现不在本 port 范围内。
+**边界情况**：`packages/ai/src`（独立的 provider 库，约 55K 行）只移植了本 port 依赖面上的部分（`types`、`models`、`event-stream`、`transcript`、`assistant-message-frame`、`overflow`、`validation`、`text`、`abort`、`uuid`、`utils`，以及 faux / anthropic / openai-completions 三个 provider），这部分是对位的独立包 [`py/pi-ai`](../pi-ai)，由本包以 editable 路径依赖。其余 pi-ai provider 与 API 实现不在本 port 范围内。
 
 已完成（与 TS 功能一一对应）：
 

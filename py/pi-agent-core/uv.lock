@@ -103,12 +103,33 @@ version = "0.85.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "pi-ai" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "pi-ai", editable = "../pi-ai" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = "==8.3.5" },
+    { name = "pytest-asyncio", specifier = "==0.25.3" },
+]
+
+[[package]]
+name = "pi-ai"
+version = "0.85.1"
+source = { editable = "../pi-ai" }
+dependencies = [
+    { name = "httpx" },
 ]
 
 [package.metadata]

@@ -13,7 +13,7 @@ import urllib.parse
 from typing import Any, Callable, List, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.uuid_utils import uuidv7
+from pi_ai.uuid_utils import uuidv7
 from ...types import FileSystem
 from ..session import StorageBackedSession
 from ..types import (

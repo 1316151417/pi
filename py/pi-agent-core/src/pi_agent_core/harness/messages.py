@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, List, Optional, Union
 
-from .._pi_ai.types import (
+from pi_ai.types import (
     ImageContent,
     Message,
     TextContent,

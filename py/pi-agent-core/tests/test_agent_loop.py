@@ -8,8 +8,8 @@ from typing import Any, List, Optional
 
 import pytest
 
-from pi_agent_core._pi_ai.event_stream import EventStream
-from pi_agent_core._pi_ai.types import (
+from pi_ai.event_stream import EventStream
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     Cost,
@@ -177,7 +177,7 @@ async def test_emits_events_with_agent_message_types() -> None:
 
 
 async def test_builds_provider_context_exclusively_from_transcript_messages() -> None:
-    from pi_agent_core._pi_ai.types import SystemMessage
+    from pi_ai.types import SystemMessage
 
     initial_system = SystemMessage(content="Transcript prompt", timestamp=1)
     context = AgentContext(messages=[], tools=[])

@@ -8,9 +8,9 @@ from typing import Any, List, Optional
 
 import pytest
 
-from pi_agent_core._pi_ai.event_stream import EventStream
-from pi_agent_core._pi_ai.transcript import get_current_system_message, to_tool_declaration
-from pi_agent_core._pi_ai.types import (
+from pi_ai.event_stream import EventStream
+from pi_ai.transcript import get_current_system_message, to_tool_declaration
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     Cost,
@@ -131,7 +131,7 @@ def test_creates_agent_with_default_state() -> None:
 
 
 def test_creates_agent_with_custom_initial_state() -> None:
-    from pi_agent_core._pi_ai.types import Model, ModelCost
+    from pi_ai.types import Model, ModelCost
 
     custom_model = Model(
         id="gpt-4o-mini",

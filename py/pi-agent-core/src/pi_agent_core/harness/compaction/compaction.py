@@ -8,9 +8,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, List, Optional, Sequence
 
-from ..._pi_ai.models import Models
-from ..._pi_ai.text import content_text
-from ..._pi_ai.types import (
+from pi_ai.models import Models
+from pi_ai.text import content_text
+from pi_ai.types import (
     AssistantMessage,
     Context as AiContext,
     Model,
@@ -24,7 +24,7 @@ from ..messages import convert_to_llm, create_branch_summary_message, create_com
 from ..result import Result, err, ok
 from ..session.context import build_context_entries, session_entry_to_context_messages
 from ..types import CompactionError
-from ..utils.retry import RetryCallbacks, RetryPolicy, retry_assistant_call
+from pi_ai.utils.retry import RetryCallbacks, RetryPolicy, retry_assistant_call
 from ..utils.usage import add_usage
 from .utils import (
     FileOperations,
@@ -221,7 +221,7 @@ class CompactGenerationOptions:
 
 def create_summary_request_options(options: SimpleStreamOptions, context: Context) -> SimpleStreamOptions:
     """Summaries are standalone requests: no cache writes, fresh session id."""
-    from ..._pi_ai.uuid_utils import uuidv7
+    from pi_ai.uuid_utils import uuidv7
 
     cloned = copy.copy(options)
     cloned.cache_retention = "none"

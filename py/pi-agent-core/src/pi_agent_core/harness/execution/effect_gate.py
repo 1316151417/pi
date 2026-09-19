@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 
-from ..._pi_ai.abort import AbortController, AbortSignal
+from pi_ai.abort import AbortController, AbortSignal
 
 __all__ = ["AbortRequested", "Gate", "GateControl", "create_gate"]
 

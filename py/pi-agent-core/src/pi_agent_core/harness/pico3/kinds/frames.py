@@ -5,7 +5,7 @@ Applies one encoded frame to the tracked output. Same switch as pi-ai's
 
 The tracked output is the document-shaped turn state — either a ``dict`` with a
 ``message`` key or any object exposing ``message`` — and its message content
-blocks may be dataclasses (:mod:`pi_agent_core._pi_ai.types`) or the plain JSON
+blocks may be dataclasses (:mod:`pi_ai.types`) or the plain JSON
 mappings a durable value store yields after replay. Both are accepted.
 """
 
@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from ...._pi_ai.assistant_message_frame import AssistantMessageFrame
-from ...._pi_ai.types import JsonObject
+from pi_ai.assistant_message_frame import AssistantMessageFrame
+from pi_ai.types import JsonObject
 
 __all__ = ["apply_frame"]
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.types import JsonValue
+from pi_ai.types import JsonValue
 from ..types import AnyKind, DocRef, Id, OwnedConversationSpec, SendInput, Task, TaskRef
 
 __all__ = ["task_api"]

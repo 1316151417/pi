@@ -10,9 +10,9 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
-from ...._pi_ai.assistant_message_frame import AssistantMessageFrameEncoder
-from ...._pi_ai.overflow import is_context_overflow, is_recoverable_length
-from ...._pi_ai.types import AssistantMessage
+from pi_ai.assistant_message_frame import AssistantMessageFrameEncoder
+from pi_ai.overflow import is_context_overflow, is_recoverable_length
+from pi_ai.types import AssistantMessage
 from ...session.commit import insert_entry, insert_usage
 from ...session.session import SessionInvariantError
 from ...session.types import (
@@ -37,7 +37,7 @@ from ...session.values import (
     pending_assistant_frames,
     set_value,
 )
-from ...utils.retry import is_retryable_assistant_error, retry_delay_ms
+from pi_ai.utils.retry import is_retryable_assistant_error, retry_delay_ms
 from ..progress import open_frame_progress
 from ..types import CommitDecision, FinishDecision, ProcedureResult
 from .retry import retry_not_before

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, List, Optional, Protocol
 
-from ..._pi_ai.types import (
+from pi_ai.types import (
     AssistantMessage,
     Context as AiContext,
 )

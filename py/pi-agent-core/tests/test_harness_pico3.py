@@ -16,9 +16,9 @@ from dataclasses import dataclass
 import pytest
 
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT, with_abort_signal
-from pi_agent_core._pi_ai.abort import AbortController
-from pi_agent_core._pi_ai.assistant_message_frame import AssistantMessageFrame
-from pi_agent_core._pi_ai.types import (
+from pi_ai.abort import AbortController
+from pi_ai.assistant_message_frame import AssistantMessageFrame
+from pi_ai.types import (
     AssistantMessage as PiAssistantMessage,
     AssistantMessageEvent as PiAssistantMessageEvent,
     Model as PiModel,

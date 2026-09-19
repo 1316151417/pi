@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..._chord.context import Context
-from ..._pi_ai.types import JsonObject
+from pi_ai.types import JsonObject
 from .delta import Op, apply_immutable, is_base
 from .types import (
     UNSET,

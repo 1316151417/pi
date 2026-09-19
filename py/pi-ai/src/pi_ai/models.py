@@ -7,6 +7,7 @@ request to the provider that owns the model.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import os
 from dataclasses import dataclass, field
@@ -73,6 +74,15 @@ class Provider:
 
     def get_models(self) -> List[Model]:
         return list(self._models)
+
+    def add_model(self, model: Model) -> Model:
+        """Register one more model on this provider and return it.
+
+        Used for OpenAI-compatible endpoints, where a ``--base-url`` override
+        can name model ids the built-in catalog does not know.
+        """
+        self._models.append(model)
+        return model
 
     def stream(
         self,
@@ -185,13 +195,14 @@ class Models:
         provider = self._providers.get(model.provider)
         if provider is None:
             raise RuntimeError(f"No provider registered for {model.provider!r}")
-        options = normalize_stream_options(options, StreamOptions)
-        api_key = options.api_key if options and options.api_key else provider.auth.resolve()
-        resolved_options = options
-        if api_key is not None and (options is None or options.api_key is None):
-            resolved_options = (
-                dataclasses.replace(options, api_key=api_key) if options else StreamOptions(api_key=api_key)
-            )
+        raw_options = options
+        current_key = _current_api_key(raw_options)
+        api_key = current_key or provider.auth.resolve()
+        resolved_options = (
+            raw_options if api_key is None or current_key else with_api_key(raw_options, api_key, StreamOptions)
+        )
+        if isinstance(resolved_options, dict):
+            resolved_options = normalize_stream_options(resolved_options, StreamOptions)
         normalized = context if isinstance(context, TranscriptContext) else normalize_context(context)
         return provider.stream(model, normalized, resolved_options)
 
@@ -204,13 +215,16 @@ class Models:
         provider = self._providers.get(model.provider)
         if provider is None:
             raise RuntimeError(f"No provider registered for {model.provider!r}")
-        options = normalize_stream_options(options)
-        api_key = options.api_key if options and options.api_key else provider.auth.resolve()
-        resolved_options = options
-        if api_key is not None and (options is None or options.api_key is None):
-            resolved_options = (
-                SimpleStreamOptions(**{**vars(options or SimpleStreamOptions()), "api_key": api_key})
-            )
+        raw_options = options
+        current_key = _current_api_key(raw_options)
+        api_key = current_key or provider.auth.resolve()
+        resolved_options = (
+            raw_options
+            if api_key is None or current_key
+            else with_api_key(raw_options, api_key, SimpleStreamOptions)
+        )
+        if isinstance(resolved_options, dict):
+            resolved_options = normalize_stream_options(resolved_options)
         normalized = context if isinstance(context, TranscriptContext) else normalize_context(context)
         return provider.stream_simple(model, normalized, resolved_options)
 
@@ -228,13 +242,15 @@ class Models:
             raise RuntimeError(
                 f"Provider {model.provider} does not support deferred responses"
             )
-        options = normalize_stream_options(options)
-        api_key = options.api_key if options and options.api_key else provider.auth.resolve()
-        resolved_options = options
-        if api_key is not None and (options is None or options.api_key is None):
-            resolved_options = SimpleStreamOptions(
-                **{**vars(options or SimpleStreamOptions()), "api_key": api_key}
-            )
+        current_key = _current_api_key(options)
+        api_key = current_key or provider.auth.resolve()
+        resolved_options = (
+            options
+            if api_key is None or current_key
+            else with_api_key(options, api_key, SimpleStreamOptions)
+        )
+        if isinstance(resolved_options, dict):
+            resolved_options = normalize_stream_options(resolved_options)
         return provider.fetch_deferred(model, handle, resolved_options)
 
     def complete(
@@ -273,13 +289,15 @@ class Models:
             raise RuntimeError(f"No provider registered for {model.provider!r}")
         if provider.cancel_deferred is None:
             raise RuntimeError(f"API cannot cancel deferred responses")
-        options = normalize_stream_options(options)
-        api_key = options.api_key if options and options.api_key else provider.auth.resolve()
-        resolved_options = options
-        if api_key is not None and (options is None or options.api_key is None):
-            resolved_options = SimpleStreamOptions(
-                **{**vars(options or SimpleStreamOptions()), "api_key": api_key}
-            )
+        current_key = _current_api_key(options)
+        api_key = current_key or provider.auth.resolve()
+        resolved_options = (
+            options
+            if api_key is None or current_key
+            else with_api_key(options, api_key, SimpleStreamOptions)
+        )
+        if isinstance(resolved_options, dict):
+            resolved_options = normalize_stream_options(resolved_options)
         await provider.cancel_deferred(model, handle, resolved_options)
 
 
@@ -310,6 +328,35 @@ def _snake_case(value: str) -> str:
         else:
             out.append(char)
     return "".join(out)
+
+
+def _current_api_key(options: Any) -> Optional[str]:
+    """Read the key an options carrier already holds, whatever shape it is."""
+    if options is None:
+        return None
+    if isinstance(options, dict):
+        return options.get("api_key") or options.get("apiKey")
+    return getattr(options, "api_key", None)
+
+
+def with_api_key(options: Any, api_key: Optional[str], cls: Any) -> Any:
+    """Return options carrying the resolved provider key.
+
+    The caller may hand over a plain mapping (normalized first), a typed options
+    object, or a foreign duck-typed carrier such as the agent loop's config —
+    which carries more fields than the options classes, so it must be passed
+    through with the key attached, never reconstructed.
+    """
+    if options is None:
+        return cls(api_key=api_key)
+    if isinstance(options, cls):
+        return options if options.api_key is not None else dataclasses.replace(options, api_key=api_key)
+    if isinstance(options, dict):
+        normalized = normalize_stream_options(options, cls)
+        return normalized if normalized.api_key is not None else dataclasses.replace(normalized, api_key=api_key)
+    resolved = copy.copy(options)
+    resolved.api_key = api_key
+    return resolved
 
 
 def create_models() -> Models:

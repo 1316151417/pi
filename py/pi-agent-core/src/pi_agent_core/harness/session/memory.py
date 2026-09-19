@@ -7,7 +7,7 @@ import time as _time
 from typing import Any, Dict, List, Optional
 
 from ..._chord.context import Context
-from ..._pi_ai.uuid_utils import uuidv7
+from pi_ai.uuid_utils import uuidv7
 from .in_memory_storage_state import InMemoryStorageState
 from .session import StorageBackedSession
 from .types import (

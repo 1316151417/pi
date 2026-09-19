@@ -15,8 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Union
 
-from .._pi_ai.models import Models
-from .._pi_ai.types import AssistantMessage, ImageContent, Model, Tool as AiTool, Usage
+from pi_ai.models import Models
+from pi_ai.types import AssistantMessage, ImageContent, Model, Tool as AiTool, Usage
 from .._chord.context import Context
 from .compaction.branch_summarization import BranchPreparation, BranchSummaryResult
 from .compaction.compaction import CompactResult, CompactionPreparation, CompactionSettings

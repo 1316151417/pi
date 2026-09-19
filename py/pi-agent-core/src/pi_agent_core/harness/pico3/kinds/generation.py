@@ -16,8 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.assistant_message_frame import AssistantMessageFrameEncoder
-from ...._pi_ai.types import (
+from pi_ai.assistant_message_frame import AssistantMessageFrameEncoder
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     DeferredHandle,
@@ -27,7 +27,7 @@ from ...._pi_ai.types import (
     message_from_json,
 )
 from ...compaction.compaction import estimate_context_tokens
-from ...utils.retry import is_retryable_assistant_error
+from pi_ai.utils.retry import is_retryable_assistant_error
 from ..system import (
     plan_managed_entry,
     prepare_draft,

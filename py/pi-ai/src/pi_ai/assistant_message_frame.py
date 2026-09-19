@@ -3,7 +3,7 @@
 The TypeScript module models :data:`AssistantMessageFrame` as a plain-object
 discriminated union; this port uses one flat dataclass with a leading ``type``
 discriminator, matching the ``AssistantMessageEvent`` style in
-:mod:`pi_agent_core._pi_ai.types`. Frames persist through :meth:`AssistantMessageFrame.to_json`
+:mod:`pi_ai.types`. Frames persist through :meth:`AssistantMessageFrame.to_json`
 and replay through :func:`frame_from_json`, so the reducer accepts either the
 dataclass or the plain wire mapping the durable value store yields after replay.
 """

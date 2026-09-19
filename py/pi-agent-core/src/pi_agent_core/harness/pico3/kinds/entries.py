@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ...._pi_ai.types import JsonValue
+from pi_ai.types import JsonValue
 from ..types import EntryKind, Id, ToolControl
 
 __all__ = [

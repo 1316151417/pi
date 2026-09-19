@@ -27,7 +27,7 @@ import weakref
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
-from ..._pi_ai.types import JsonObject, JsonValue, ThinkingLevel
+from pi_ai.types import JsonObject, JsonValue, ThinkingLevel
 from ..._chord.context import Context, create_context_key, with_context_value, without_abort_signal
 from .context import derive_context
 from .delta import Op, Tracker, is_base, track

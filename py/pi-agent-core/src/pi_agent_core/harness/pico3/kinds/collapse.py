@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.types import JsonObject, JsonValue
+from pi_ai.types import JsonObject, JsonValue
 from ..bounded import Bounded  # noqa: F401 - imported for parity with the TS module graph
 from ..system import effective_tools
 from ..types import (

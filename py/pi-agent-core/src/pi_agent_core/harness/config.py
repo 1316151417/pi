@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, List, Sequence
 
 from .compaction.compaction import CompactionSettings
-from .utils.retry import DEFAULT_MAX_AGENT_RETRY_DELAY_MS, RetryPolicy
+from pi_ai.utils.retry import DEFAULT_MAX_AGENT_RETRY_DELAY_MS, RetryPolicy
 
 __all__ = [
     "DEFAULT_RETRY_POLICY",

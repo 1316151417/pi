@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterator, List, Optional
 
-from ..._pi_ai.types import JsonValue
+from pi_ai.types import JsonValue
 
 __all__ = ["Membrane", "RevokedError", "PlainInputError"]
 

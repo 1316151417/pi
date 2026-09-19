@@ -23,7 +23,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Set
 
-from ..._pi_ai.abort import AbortController
+from pi_ai.abort import AbortController
 from ..._chord.context import Context, with_abort_signal
 from .types import (
     UNSET,

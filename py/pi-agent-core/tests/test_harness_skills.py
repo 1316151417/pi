@@ -136,7 +136,7 @@ def test_bash_execution_to_text():
 
 
 def test_convert_to_llm_maps_custom_roles():
-    from pi_agent_core._pi_ai.types import TextContent, UserMessage
+    from pi_ai.types import TextContent, UserMessage
 
     messages = [
         UserMessage(content="hi", timestamp=1),

@@ -7,14 +7,14 @@ import copy
 import time
 from typing import Any, Callable, List, Optional, Sequence, Set, Union
 
-from ._pi_ai.abort import AbortController, AbortSignal
-from ._pi_ai.transcript import (
+from pi_ai.abort import AbortController, AbortSignal
+from pi_ai.transcript import (
     create_initial_system_message,
     get_current_system_message,
     get_current_system_prompt,
     to_tool_declaration,
 )
-from ._pi_ai.types import (
+from pi_ai.types import (
     AgentMessage,
     AssistantMessage,
     Cost,

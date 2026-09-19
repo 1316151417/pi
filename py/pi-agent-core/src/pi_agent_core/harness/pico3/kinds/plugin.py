@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.types import JsonValue
+from pi_ai.types import JsonValue
 from ..types import Completion, Kind, Step, Task, to_stored
 from .task_api import task_api
 

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, List, Set
 
-from ..._pi_ai.text import content_text
+from pi_ai.text import content_text
 
 __all__ = [
     "FileOperations",

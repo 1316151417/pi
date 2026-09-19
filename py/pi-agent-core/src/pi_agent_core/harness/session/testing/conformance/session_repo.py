@@ -19,7 +19,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional
 
-from ....._pi_ai.types import AssistantMessage, DeferredHandle, TextContent, ToolCall, Usage, UserMessage
+from pi_ai.types import AssistantMessage, DeferredHandle, TextContent, ToolCall, Usage, UserMessage
 from ....context import BACKGROUND_CONTEXT
 from ...commit import insert_entry, insert_usage
 from ...types import (

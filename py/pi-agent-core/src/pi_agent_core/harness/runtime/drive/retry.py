@@ -6,8 +6,8 @@ import asyncio
 import time
 from typing import Optional
 
-from ...._pi_ai.abort import AbortSignal
-from ...utils.retry import RetryPolicy, retry_delay_ms
+from pi_ai.abort import AbortSignal
+from pi_ai.utils.retry import RetryPolicy, retry_delay_ms
 
 __all__ = ["retry_not_before", "wait_until", "MAX_TIMER_MS"]
 

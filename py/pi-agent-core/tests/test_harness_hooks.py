@@ -36,7 +36,7 @@ from pi_agent_core.harness.types import (
     AgentHarnessTool,
     ExecutionToolContext,
 )
-from pi_agent_core.harness.utils.retry import RetryPolicy
+from pi_ai.utils.retry import RetryPolicy
 
 ECHO_SCHEMA = {
     "type": "object",
@@ -48,7 +48,7 @@ ECHO_SCHEMA = {
 def echo_tool(executed=None) -> AgentHarnessTool:
     async def execute(tool_call_id, params, on_update, tool_context, invocation, context):
         from pi_agent_core.types import AgentToolResult
-        from pi_agent_core._pi_ai.types import TextContent
+        from pi_ai.types import TextContent
 
         if executed is not None:
             executed.append(params)
@@ -95,7 +95,7 @@ def test_validate_tool_names_rejects_duplicates():
 
 async def test_hook_registry_before_run_accumulates_messages():
     registry = HookRegistry(lambda error, hook, lane, context: asyncio.sleep(0))
-    from pi_agent_core._pi_ai.types import UserMessage
+    from pi_ai.types import UserMessage
 
     registry.on("before_run", lambda event, ctx: {"messages": [UserMessage(content="extra", timestamp=1)]})
     registry.on("before_run", lambda event, ctx: None)
@@ -275,7 +275,7 @@ async def test_execute_tool_call_blocked_by_closed_gate():
 
 
 def test_finalize_tool_call_applies_patch_field_by_field():
-    from pi_agent_core._pi_ai.types import TextContent
+    from pi_ai.types import TextContent
     from pi_agent_core.types import AgentToolResult
 
     call = ClearedToolCall(tool_call=_Call("echo", {}), tool=None, args={})

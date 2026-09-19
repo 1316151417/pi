@@ -9,8 +9,8 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
-from ...._pi_ai.assistant_message_frame import reduce_assistant_message_frames
-from ...._pi_ai.types import AssistantMessage, Cost, Usage
+from pi_ai.assistant_message_frame import reduce_assistant_message_frames
+from pi_ai.types import AssistantMessage, Cost, Usage
 from ...session.types import AssistantEffectPendingOperation
 from ..progress import read_assistant_frames
 from ..types import LaneReturn, ProcedureResult

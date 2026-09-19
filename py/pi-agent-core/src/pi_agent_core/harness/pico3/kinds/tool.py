@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ...._chord.context import Context
-from ...._pi_ai.types import JsonObject, JsonValue
+from pi_ai.types import JsonObject, JsonValue
 from ...utils.truncate import truncate_head  # noqa: F401 - imported for parity with the TS module graph
 from ..bounded import Bounded
 from ..types import (
@@ -104,7 +104,7 @@ def synthetic(text: str, code: str) -> ToolResult:
 
 def invalid(declaration: Any, call: StoredToolCall) -> Optional[str]:
     """Validate arguments with the tool's real schema."""
-    from ...._pi_ai.validation import collect_errors
+    from pi_ai.validation import collect_errors
 
     parameters = getattr(declaration, "parameters", None)
     if isinstance(declaration, dict):

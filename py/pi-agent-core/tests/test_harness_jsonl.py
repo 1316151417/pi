@@ -10,7 +10,7 @@ import time
 import pytest
 
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT
-from pi_agent_core._pi_ai.types import TextContent, UserMessage
+from pi_ai.types import TextContent, UserMessage
 from pi_agent_core.harness.env.local import create_local_execution_env
 from pi_agent_core.harness.session import (
     CommitResult,
@@ -197,7 +197,7 @@ async def test_storage_rejects_bad_version_and_closed_use(workdir):
 
 
 async def test_storage_usage_rows_accumulate(workdir):
-    from pi_agent_core._pi_ai.types import Usage
+    from pi_ai.types import Usage
     from pi_agent_core.harness.session import UsageRow
 
     env = create_local_execution_env(cwd=workdir)

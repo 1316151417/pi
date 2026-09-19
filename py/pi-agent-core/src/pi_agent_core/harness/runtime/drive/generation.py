@@ -111,7 +111,7 @@ async def prepare_generation(lane: Any, drive: Any, generation: AssistantReadyOp
             raise SessionInvariantError(
                 f"Configured tool {name} disappeared during resolution"
             )
-        from ...._pi_ai.types import Tool as AiTool
+        from pi_ai.types import Tool as AiTool
 
         tools.append(
             AiTool(

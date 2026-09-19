@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, List, Optional
 
-from ..._pi_ai.types import TextContent
+from pi_ai.types import TextContent
 from ...types import AgentToolResult
 from ..._chord.context import Context
 from ..types import (

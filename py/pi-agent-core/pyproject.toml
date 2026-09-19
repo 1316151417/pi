@@ -1,0 +1,35 @@
+[project]
+name = "pi-agent-core"
+version = "0.85.1"
+description = "Python port of @earendil-works/pi-agent-core: stateful agent with tool execution and event streaming"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "pi contributors" }]
+keywords = ["ai", "agent", "llm", "streaming"]
+dependencies = ["httpx==0.28.1"]
+
+[project.scripts]
+pi-agent-core = "pi_agent_core.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pi_agent_core"]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.5",
+    "pytest-asyncio==0.25.3",
+]
+
+[tool.uv]
+# `dev` is already uv's default group; stating it keeps the intent explicit.
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

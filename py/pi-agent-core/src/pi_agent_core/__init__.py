@@ -7,7 +7,9 @@ Mirrors the TypeScript package entry points:
 
 * ``pi_agent_core`` — agent, agent-loop, harness, tools, session, compaction,
   skills, prompt templates, proxy, search, types
-* ``pi_agent_core.cli`` — runnable demo program
+
+The runnable demo CLI lives in the separate ``pi-simple-cli`` package (the
+``pi`` command).
 """
 
 from pi_ai.abort import AbortController, AbortError, AbortSignal

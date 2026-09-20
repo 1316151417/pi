@@ -37,13 +37,18 @@ OAuth 流程、完整模型目录与 image models、各厂 compat 自动检测�
 
 ## 安装 / 使用
 
+本包是 `py/` uv workspace 的成员（与 `pi-agent-core`、`pi-simple-cli` 共用一份
+`uv.lock` 和一个 `.venv`）：
+
 ```bash
-cd py/pi-ai
-uv sync
+cd py
+uv sync              # 一次同步整个 workspace
+cd pi-ai
 uv run pytest -q
 ```
 
-pi-agent-core 通过 `[tool.uv.sources]` 以 editable 路径依赖本包，所以改这里立刻生效。
+`pi-agent-core` 与 `pi-simple-cli` 通过 `[tool.uv.sources]` 的 `{ workspace = true }`
+依赖本包（workspace 成员间依赖默认 editable），所以改这里立刻生效。
 
 ## 测试
 

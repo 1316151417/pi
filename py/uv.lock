@@ -2,6 +2,13 @@ version = 1
 revision = 1
 requires-python = ">=3.12"
 
+[manifest]
+members = [
+    "pi-agent-core",
+    "pi-ai",
+    "pi-simple-cli",
+]
+
 [[package]]
 name = "anyio"
 version = "4.15.1"
@@ -98,9 +105,36 @@ wheels = [
 ]
 
 [[package]]
+name = "pi-agent-core"
+version = "0.85.1"
+source = { editable = "pi-agent-core" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pi-ai" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "pi-ai", editable = "pi-ai" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = "==8.3.5" },
+    { name = "pytest-asyncio", specifier = "==0.25.3" },
+]
+
+[[package]]
 name = "pi-ai"
 version = "0.85.1"
-source = { editable = "." }
+source = { editable = "pi-ai" }
 dependencies = [
     { name = "httpx" },
 ]
@@ -113,6 +147,33 @@ dev = [
 
 [package.metadata]
 requires-dist = [{ name = "httpx", specifier = "==0.28.1" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = "==8.3.5" },
+    { name = "pytest-asyncio", specifier = "==0.25.3" },
+]
+
+[[package]]
+name = "pi-simple-cli"
+version = "0.85.1"
+source = { editable = "pi-simple-cli" }
+dependencies = [
+    { name = "pi-agent-core" },
+    { name = "pi-ai" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pi-agent-core", editable = "pi-agent-core" },
+    { name = "pi-ai", editable = "pi-ai" },
+]
 
 [package.metadata.requires-dev]
 dev = [

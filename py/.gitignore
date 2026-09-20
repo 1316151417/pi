@@ -1,0 +1,16 @@
+# uv / virtualenv
+.venv/
+__pycache__/
+*.egg-info/
+
+# tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# build artifacts
+dist/
+build/
+
+# OS
+.DS_Store

@@ -1,0 +1,2 @@
+[tool.uv.workspace]
+members = ["pi-agent-core", "pi-ai", "pi-simple-cli"]

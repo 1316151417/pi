@@ -1,25 +1,29 @@
 [project]
-name = "pi-agent-core"
+name = "pi-simple-cli"
 version = "0.85.1"
-description = "Python port of @earendil-works/pi-agent-core: stateful agent with tool execution and event streaming"
+description = "Simple CLI for the pi-agent-core Python port: demo chat, offline self-test, and the durable harness runtime"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "pi contributors" }]
-keywords = ["ai", "agent", "llm", "streaming"]
+keywords = ["ai", "agent", "llm", "cli"]
 dependencies = [
-    "httpx==0.28.1",
+    "pi-agent-core==0.85.1",
     "pi-ai==0.85.1",
 ]
+
+[project.scripts]
+pi = "pi_simple_cli.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pi_agent_core"]
+packages = ["src/pi_simple_cli"]
 
 [tool.uv.sources]
+pi-agent-core = { workspace = true }
 pi-ai = { workspace = true }
 
 [dependency-groups]

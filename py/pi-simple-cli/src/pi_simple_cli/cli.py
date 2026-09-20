@@ -2,14 +2,15 @@
 
 Run modes:
 
-* ``pi-agent-core``                       -> interactive chat with the faux model
-* ``pi-agent-core --provider anthropic``  -> real Anthropic API (ANTHROPIC_API_KEY)
-* ``pi-agent-core --provider openai``     -> real OpenAI API (OPENAI_API_KEY)
-* ``pi-agent-core --prompt "hi"``         -> one-shot, then exit
-* ``pi-agent-core --self-test``           -> offline self test with the faux provider
+* ``pi``                       -> interactive chat with the faux model
+* ``pi --provider anthropic``  -> real Anthropic API (ANTHROPIC_API_KEY)
+* ``pi --provider openai``     -> real OpenAI API (OPENAI_API_KEY)
+* ``pi --prompt "hi"``         -> one-shot, then exit
+* ``pi --self-test``           -> offline self test with the faux provider
 
 The demo ships a small tool set (echo, get_time) so tool-calling can be
-exercised end to end.
+exercised end to end. Shipped as the ``pi`` command by the ``pi-simple-cli``
+package.
 """
 
 from __future__ import annotations
@@ -22,7 +23,14 @@ import tempfile
 import time
 from typing import Any, List, Optional
 
-from . import Agent, AgentOptions, AgentInitialState, AgentTool, AgentToolResult, set_default_stream_fn
+from pi_agent_core import (
+    Agent,
+    AgentOptions,
+    AgentInitialState,
+    AgentTool,
+    AgentToolResult,
+    set_default_stream_fn,
+)
 from pi_ai.models import Models, create_models
 from pi_ai.providers.anthropic import anthropic_provider
 from pi_ai.providers.faux import (
@@ -41,14 +49,14 @@ from pi_ai.types import (
     ToolCall,
     ToolResultMessage,
 )
-from .harness.env.local import create_local_execution_env
-from .harness.session.jsonl import (
+from pi_agent_core.harness.env.local import create_local_execution_env
+from pi_agent_core.harness.session.jsonl import (
     JsonlSessionListOptions,
     JsonlSessionCreateOptions,
     JsonlSessionRepo,
     JsonlSessionRepoOptions,
 )
-from .harness.tool_adapter import (
+from pi_agent_core.harness.tool_adapter import (
     StaticToolContext,
     default_agent_harness_tools,
     default_harness_tools,
@@ -287,7 +295,7 @@ async def run_harness_repl(
 ) -> None:
     """Interactive REPL driving the durable AgentHarness runtime."""
     sys.stdout.write(
-        "pi-agent-core (Python port, AgentHarness runtime). /quit /state /lanes /abort\n"
+        "pi (Python port, AgentHarness runtime). /quit /state /lanes /abort\n"
     )
     if initial_prompt is not None:
         await _harness_turn(lane, initial_prompt)
@@ -342,12 +350,12 @@ async def run_harness(
     tool_context: Any = None,
 ) -> int:
     """Drive the full AgentHarness runtime instead of the bare agent loop."""
-    from .harness.agent_harness import AgentHarnessOptions, create_agent_harness
-    from .harness.tool_adapter import (
-    StaticToolContext,
-    default_agent_harness_tools,
-    default_harness_tools,
-)
+    from pi_agent_core.harness.agent_harness import AgentHarnessOptions, create_agent_harness
+    from pi_agent_core.harness.tool_adapter import (
+        StaticToolContext,
+        default_agent_harness_tools,
+        default_harness_tools,
+    )
 
     if log_session is None:
         raise SystemExit("--runtime harness requires --session or --resume")
@@ -429,7 +437,7 @@ def make_harness_message_update_listener() -> Any:
 
 
 async def run_interactive(agent: Agent, initial_prompt: Optional[str]) -> None:
-    sys.stdout.write("pi-agent-core (Python port). /quit to exit, /reset to clear, /state for state.\n")
+    sys.stdout.write("pi (Python port). /quit to exit, /reset to clear, /state for state.\n")
     if initial_prompt:
         await agent.prompt(initial_prompt)
     loop = asyncio.get_running_loop()
@@ -537,14 +545,14 @@ async def _self_test_agent_harness_runtime() -> None:
     """Prove the durable AgentHarness runtime end to end on a JSONL session."""
     from pi_ai.models import Provider
     from pi_ai.providers.faux import faux_assistant_message, faux_tool_call
-    from .harness.agent_harness import AgentHarnessOptions, create_agent_harness
-    from .harness.session.jsonl import (
+    from pi_agent_core.harness.agent_harness import AgentHarnessOptions, create_agent_harness
+    from pi_agent_core.harness.session.jsonl import (
         JsonlSessionCreateOptions,
         JsonlSessionRepo,
         JsonlSessionRepoOptions,
     )
-    from .harness.session.values import branch_tip
-    from .harness.tool_adapter import StaticToolContext, default_agent_harness_tools
+    from pi_agent_core.harness.session.values import branch_tip
+    from pi_agent_core.harness.tool_adapter import StaticToolContext, default_agent_harness_tools
 
     with tempfile.TemporaryDirectory() as tmp:
         handle, functions = create_faux_core(
@@ -615,7 +623,7 @@ async def _self_test_agent_harness_runtime() -> None:
 
 
 async def async_main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(prog="pi-agent-core", description="pi-agent-core Python port demo")
+    parser = argparse.ArgumentParser(prog="pi", description="pi demo CLI (pi-agent-core Python port)")
     parser.add_argument("--provider", default="faux", choices=["faux", "anthropic", "openai"])
     parser.add_argument(
         "--base-url",
@@ -752,7 +760,7 @@ async def async_main(argv: Optional[List[str]] = None) -> int:
 
 def _ctx():
     """Root chord context for CLI-driven session work."""
-    from ._chord.context import BACKGROUND_CONTEXT
+    from pi_agent_core._chord.context import BACKGROUND_CONTEXT
 
     return BACKGROUND_CONTEXT
 

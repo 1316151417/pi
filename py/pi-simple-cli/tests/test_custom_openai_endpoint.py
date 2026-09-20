@@ -18,7 +18,7 @@ import pytest
 
 from pi_agent_core import Agent, AgentInitialState, AgentOptions
 from pi_agent_core._chord.context import BACKGROUND_CONTEXT
-from pi_agent_core.cli import build_models, resolve_model
+from pi_simple_cli.cli import build_models, resolve_model
 
 
 class _OpenAICompatServer:

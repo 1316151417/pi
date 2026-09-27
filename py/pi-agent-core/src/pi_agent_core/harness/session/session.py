@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from pi_ai._javascript import javascript_json_stringify
 from pi_ai.uuid_utils import uuidv7
 from ..._chord.context import Context
 from .commit import insert_entry
@@ -13,10 +15,12 @@ from .types import (
     Branch,
     BranchScan,
     CommitResult,
+    CustomEntry,
     Entry,
     EntryQuery,
     EntryScan,
     IdGenerator,
+    MessageEntry,
     SessionMetadata,
     SessionStats,
     Storage,
@@ -58,7 +62,7 @@ class SessionInvariantError(RuntimeError):
 
 class SessionInvalidBranchError(RuntimeError):
     def __init__(self, branch: str, reason: str) -> None:
-        super().__init__(f"Invalid branch {branch!r}: {reason}")
+        super().__init__(f"Invalid branch {javascript_json_stringify(branch)}: {reason}")
         self.name = "SessionInvalidBranchError"
         self.branch = branch
         self.reason = reason
@@ -238,6 +242,7 @@ class StorageBackedSession:
         # A facade shares its storage with the owning repo, which closes it.
         self._owns_storage = options.get("owns_storage", True)
         self._branches: Dict[str, _StorageBackedBranch] = {}
+        self._closed_error = RuntimeError("Session is closed")
         self._state = "open"
         self._close_task: Optional[asyncio.Task] = None
 
@@ -278,13 +283,13 @@ class StorageBackedSession:
         mutator = await self.begin_mutation(context)
         try:
             result = mutation(mutator, context)
-            if asyncio.iscoroutine(result):
+            if inspect.isawaitable(result):
                 result = await result
+            else:
+                await asyncio.sleep(0)
             return result
         finally:
-            end = mutator.end(context)
-            if asyncio.iscoroutine(end) or asyncio.isfuture(end):
-                await end
+            await mutator.end(context)
 
     # ------------------------------------------------------------------
     # Reads
@@ -330,9 +335,9 @@ class StorageBackedSession:
     async def find_entries(self, query: Optional[EntryQuery], context: Context) -> List[Entry]:
         query = query or EntryQuery()
         self._assert_open()
-        order = query.order or "desc"
+        order = query.order if query.order is not None else "desc"
         if query.cursor is not None:
-            if order == "asc" and query.cursor.seq >= (2**53 - 1):
+            if order == "asc" and query.cursor.seq == (2**53 - 1):
                 return []
             if order == "desc" and query.cursor.seq <= 1:
                 return []
@@ -425,20 +430,22 @@ class StorageBackedSession:
 
     async def close(self, context: Context) -> None:
         if self._close_task is not None:
-            await self._close_task
+            await asyncio.shield(self._close_task)
             return
         self._state = "closing"
 
         async def _close() -> None:
-            await self._mutation_line.seal(RuntimeError("Session is closed"))
-            if self._owns_storage:
-                await self._storage.close(context)
-            self._state = "closed"
-            if self._on_close is not None:
-                self._on_close()
+            try:
+                await self._mutation_line.seal(self._closed_error)
+                if self._owns_storage:
+                    await self._storage.close(context)
+            finally:
+                self._state = "closed"
+                if self._on_close is not None:
+                    self._on_close()
 
         self._close_task = asyncio.get_running_loop().create_task(_close())
-        await self._close_task
+        await asyncio.shield(self._close_task)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -465,12 +472,8 @@ class StorageBackedSession:
             if tip is None:
                 raise SessionInvariantError(f"Unknown branch: {name}")
             if entry.get("type") == "message":
-                from .types import MessageEntry
-
                 new_entry = MessageEntry(id=entry_id, parent_id=tip.value, message=entry["message"])
             else:
-                from .types import CustomEntry
-
                 new_entry = CustomEntry(
                     id=entry_id, parent_id=tip.value, custom_type=entry.get("customType", ""),
                     data=entry.get("data"),
@@ -498,4 +501,4 @@ class StorageBackedSession:
 
     def _assert_open(self) -> None:
         if self._state != "open":
-            raise RuntimeError("Session is closed")
+            raise self._closed_error

@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import dataclasses
+import inspect
 import time
-from typing import Any, List, Optional, Sequence, Union
+from collections.abc import Awaitable
+from typing import List, Optional, Union, cast
 
 from pi_ai.abort import AbortSignal
 from pi_ai.event_stream import EventStream
@@ -25,16 +26,15 @@ from pi_ai.types import (
     AgentMessage,
     AssistantMessage,
     Context,
-    Message,
+    JsonObject,
     SystemMessage,
+    TextContent,
     ToolResultMessage,
-    TranscriptContext,
 )
 from pi_ai.validation import validate_tool_arguments
 from .stream_fn import get_default_stream_fn
 from .types import (
     AfterToolCallContext,
-    AfterToolCallResult,
     AgentContext,
     AgentEndEvent,
     AgentEvent,
@@ -60,9 +60,10 @@ from .types import (
 __all__ = ["agent_loop", "agent_loop_continue", "run_agent_loop", "run_agent_loop_continue"]
 
 
-async def _maybe_await(value: Any) -> Any:
-    if asyncio.iscoroutine(value) or asyncio.isfuture(value):
-        return await value
+async def _maybe_await[T](value: T | Awaitable[T]) -> T:
+    if inspect.isawaitable(value):
+        return await cast(Awaitable[T], value)
+    await asyncio.sleep(0)
     return value
 
 
@@ -164,10 +165,8 @@ async def run_agent_loop(
     """Start an agent loop with new prompt messages; returns all new messages."""
     initial_messages = _declare_tool_changes(context, prompts)
     new_messages: List[AgentMessage] = list(initial_messages)
-    current_context = AgentContext(
-        messages=[*context.messages, *initial_messages],
-        tools=context.tools,
-    )
+    current_context = copy.copy(context)
+    current_context.messages = [*context.messages, *initial_messages]
 
     await _maybe_await(emit(AgentStartEvent()))
     await _maybe_await(emit(TurnStartEvent()))
@@ -193,7 +192,7 @@ async def run_agent_loop_continue(
         raise RuntimeError("Cannot continue from message role: assistant")
 
     new_messages: List[AgentMessage] = []
-    current_context = AgentContext(messages=list(context.messages), tools=context.tools)
+    current_context = copy.copy(context)
 
     await _maybe_await(emit(AgentStartEvent()))
     await _maybe_await(emit(TurnStartEvent()))
@@ -220,7 +219,7 @@ async def _run_loop(
     last_completed_turn: Optional[PrepareNextTurnContext] = None
     # Check for steering messages at start (user may have typed while waiting)
     pending_messages: List[AgentMessage] = (
-        list(await config.get_steering_messages()) if config.get_steering_messages else []
+        (await _maybe_await(config.get_steering_messages())) or [] if config.get_steering_messages else []
     )
 
     # Outer loop: continues when queued follow-up messages arrive after agent would stop
@@ -237,26 +236,18 @@ async def _run_loop(
                     next_turn_snapshot = None
                 if next_turn_snapshot is not None:
                     current_context = next_turn_snapshot.context or current_context
-                    prepared_messages = list(next_turn_snapshot.messages or [])
-                    config = dataclasses.replace(
-                        config,
-                        model=next_turn_snapshot.model or config.model,
-                        reasoning=(
-                            config.reasoning
-                            if next_turn_snapshot.thinking_level is None
-                            else (
-                                None
-                                if next_turn_snapshot.thinking_level == "off"
-                                else next_turn_snapshot.thinking_level
-                            )
-                        ),
-                    )
+                    prepared_messages = next_turn_snapshot.messages if next_turn_snapshot.messages is not None else []
+                    config = copy.copy(config)
+                    if next_turn_snapshot.model is not None:
+                        config.model = next_turn_snapshot.model
+                    if next_turn_snapshot.thinking_level is not None:
+                        config.reasoning = None if next_turn_snapshot.thinking_level == "off" else next_turn_snapshot.thinking_level
                 # Preparation can be long-running (for example, compaction). Pick up
                 # steering queued while it ran. Only poll again if the earlier poll
                 # returned nothing; otherwise one-at-a-time mode would deliver two
                 # messages in this turn.
                 if len(pending_messages) == 0 and config.get_steering_messages:
-                    pending_messages = list(await config.get_steering_messages())
+                    pending_messages = (await _maybe_await(config.get_steering_messages())) or []
                 await _maybe_await(emit(TurnStartEvent()))
 
             # Process prepared and queued messages before the next assistant response.
@@ -314,11 +305,11 @@ async def _run_loop(
                 return
 
             if config.get_steering_messages:
-                pending_messages = list(await config.get_steering_messages())
+                pending_messages = (await _maybe_await(config.get_steering_messages())) or []
 
         # Agent would stop here. Check for follow-up messages.
         follow_up_messages = (
-            list(await config.get_follow_up_messages()) if config.get_follow_up_messages else []
+            (await _maybe_await(config.get_follow_up_messages())) or [] if config.get_follow_up_messages else []
         )
         if len(follow_up_messages) > 0:
             # Set as pending so inner loop processes them
@@ -380,15 +371,9 @@ _NO_CHANGES = ToolStateChanges(tools_added=[], tools_removed=[])
 
 def _with_tool_changes(message: SystemMessage, changes: ToolStateChanges) -> SystemMessage:
     """Copy a system message with its tool fields replaced by ``changes``; empty lists omit the field."""
-    updated = SystemMessage(
-        content=copy.deepcopy(message.content),
-        sections=None if message.sections is None else dict(message.sections),
-        timestamp=message.timestamp,
-    )
-    if len(changes.tools_added) > 0:
-        updated.tools_added = list(changes.tools_added)
-    if len(changes.tools_removed) > 0:
-        updated.tools_removed = list(changes.tools_removed)
+    updated = copy.copy(message)
+    updated.tools_added = changes.tools_added if changes.tools_added else None
+    updated.tools_removed = changes.tools_removed if changes.tools_removed else None
     return updated
 
 
@@ -408,7 +393,7 @@ async def _stream_assistant_response(
     # Apply context transform if configured (AgentMessage[] -> AgentMessage[])
     messages = context.messages
     if config.transform_context is not None:
-        messages = await config.transform_context(messages, signal)
+        messages = await _maybe_await(config.transform_context(messages, signal))
 
     # Convert to LLM-compatible messages (AgentMessage[] -> Message[])
     llm_messages = await _maybe_await(config.convert_to_llm(messages))
@@ -420,10 +405,10 @@ async def _stream_assistant_response(
     if config.get_api_key is not None:
         resolved_api_key = (await _maybe_await(config.get_api_key(config.model.provider))) or config.api_key
 
-    request_options = dataclasses.replace(config, api_key=resolved_api_key, signal=signal)
-    response = stream_function(config.model, llm_context, request_options)
-    if asyncio.iscoroutine(response) or asyncio.isfuture(response):
-        response = await response
+    request_options = copy.copy(config)
+    request_options.api_key = resolved_api_key
+    request_options.signal = signal
+    response = await _maybe_await(stream_function(config.model, llm_context, request_options))
 
     partial_message: Optional[AssistantMessage] = None
     added_partial = False
@@ -433,7 +418,7 @@ async def _stream_assistant_response(
             partial_message = event.partial
             context.messages.append(partial_message)
             added_partial = True
-            await _maybe_await(emit(MessageStartEvent(message=copy.deepcopy(partial_message))))
+            await _maybe_await(emit(MessageStartEvent(message=copy.copy(partial_message))))
         elif event.type in (
             "text_start",
             "text_delta",
@@ -451,7 +436,7 @@ async def _stream_assistant_response(
                 await _maybe_await(
                     emit(
                         MessageUpdateEvent(
-                            message=copy.deepcopy(partial_message),
+                            message=copy.copy(partial_message),
                             assistant_message_event=event,
                         )
                     )
@@ -463,7 +448,7 @@ async def _stream_assistant_response(
             else:
                 context.messages.append(final_message)
             if not added_partial:
-                await _maybe_await(emit(MessageStartEvent(message=copy.deepcopy(final_message))))
+                await _maybe_await(emit(MessageStartEvent(message=copy.copy(final_message))))
             await _maybe_await(emit(MessageEndEvent(message=final_message)))
             return final_message
 
@@ -472,7 +457,7 @@ async def _stream_assistant_response(
         context.messages[-1] = final_message
     else:
         context.messages.append(final_message)
-        await _maybe_await(emit(MessageStartEvent(message=copy.deepcopy(final_message))))
+        await _maybe_await(emit(MessageStartEvent(message=copy.copy(final_message))))
     await _maybe_await(emit(MessageEndEvent(message=final_message)))
     return final_message
 
@@ -540,7 +525,7 @@ async def _execute_tool_calls(
 
 
 class _PreparedToolCall:
-    def __init__(self, tool_call: AgentToolCall, tool: AgentTool, args: Any) -> None:
+    def __init__(self, tool_call: AgentToolCall, tool: AgentTool, args: object) -> None:
         self.kind = "prepared"
         self.tool_call = tool_call
         self.tool = tool
@@ -577,8 +562,8 @@ def _prepare_tool_call_arguments(tool: AgentTool, tool_call: AgentToolCall) -> A
     prepared_arguments = tool.prepare_arguments(tool_call.arguments)
     if prepared_arguments is tool_call.arguments:
         return tool_call
-    updated = copy.deepcopy(tool_call)
-    updated.arguments = prepared_arguments
+    updated = copy.copy(tool_call)
+    updated.arguments = cast(JsonObject, prepared_arguments)
     return updated
 
 
@@ -639,14 +624,14 @@ async def _execute_prepared_tool_call(
     signal: Optional[AbortSignal],
     emit: AgentEventSink,
 ) -> _ExecutedToolCallOutcome:
-    update_events: List[Any] = []
+    update_events: list[asyncio.Future[None]] = []
     accepting_updates = True
 
-    def _on_update(partial_result: Any) -> None:
+    def _on_update(partial_result: AgentToolResult) -> None:
         if not accepting_updates:
             return
         update_events.append(
-            _maybe_await(
+            asyncio.ensure_future(_maybe_await(
                 emit(
                     ToolExecutionUpdateEvent(
                         tool_call_id=prepared.tool_call.id,
@@ -655,23 +640,23 @@ async def _execute_prepared_tool_call(
                         partial_result=partial_result,
                     )
                 )
-            )
+            ))
         )
 
     try:
         assert prepared.tool.execute is not None
-        result = await prepared.tool.execute(
+        result = await _maybe_await(prepared.tool.execute(
             prepared.tool_call.id,
             prepared.args,
             signal,
             _on_update,
-        )
+        ))
         accepting_updates = False
-        await asyncio.gather(*[f for f in update_events if asyncio.isfuture(f) or asyncio.iscoroutine(f)])
+        await asyncio.gather(*update_events)
         return _ExecutedToolCallOutcome(result=result, is_error=False)
     except Exception as error:  # noqa: BLE001 - mirrors TS catch
         accepting_updates = False
-        await asyncio.gather(*[f for f in update_events if asyncio.isfuture(f) or asyncio.iscoroutine(f)])
+        await asyncio.gather(*update_events)
         return _ExecutedToolCallOutcome(
             result=_create_error_tool_result(str(error)),
             is_error=True,
@@ -707,6 +692,7 @@ async def _finalize_executed_tool_call(
                 )
             )
             if after_result is not None:
+                result = copy.copy(result)
                 if after_result.content is not None:
                     result.content = after_result.content
                 if after_result.details is not None:
@@ -782,7 +768,7 @@ async def _execute_tool_calls_parallel(
     signal: Optional[AbortSignal],
     emit: AgentEventSink,
 ) -> _ExecutedToolCallBatch:
-    finalized_entries: List[Union[_FinalizedToolCallOutcome, Any]] = []
+    finalized_entries: list[_FinalizedToolCallOutcome | Awaitable[_FinalizedToolCallOutcome]] = []
 
     for tool_call in tool_calls:
         await _maybe_await(
@@ -830,7 +816,7 @@ async def _execute_tool_calls_parallel(
 
     ordered_finalized_calls: List[_FinalizedToolCallOutcome] = list(
         await asyncio.gather(
-            *[entry if asyncio.iscoroutine(entry) else _wrap_value(entry) for entry in finalized_entries]
+            *[_maybe_await(entry) for entry in finalized_entries]
         )
     )
 
@@ -846,13 +832,7 @@ async def _execute_tool_calls_parallel(
     )
 
 
-async def _wrap_value(value: Any) -> Any:
-    return value
-
-
 def _create_error_tool_result(message: str) -> AgentToolResult:
-    from pi_ai.types import TextContent
-
     return AgentToolResult(content=[TextContent(text=message)], details={})
 
 
@@ -875,7 +855,7 @@ def _create_tool_result_message(finalized: _FinalizedToolCallOutcome) -> ToolRes
         tool_name=finalized.tool_call.name,
         # Untyped tools can return results without content; normalize so the
         # null never enters session history or provider payloads.
-        content=finalized.result.content or [],
+        content=finalized.result.content if finalized.result.content is not None else [],
         details=finalized.result.details,
         usage=finalized.result.usage,
         is_error=finalized.is_error,

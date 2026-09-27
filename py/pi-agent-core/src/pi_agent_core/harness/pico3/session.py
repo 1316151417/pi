@@ -1823,14 +1823,14 @@ class Session:
         opts: Optional[Dict[str, Any]] = None,
     ) -> CommitResult:
         opts = opts or {}
-        if ctx.signal is not None:
-            ctx.signal.throw_if_aborted()
+        if ctx.abort_signal is not None:
+            ctx.abort_signal.throw_if_aborted()
         authority = _normalize_invoker(invoker)
 
         async def operation(line_ctx: Context) -> CommitResult:
             self.assert_usable()
-            if line_ctx.signal is not None:
-                line_ctx.signal.throw_if_aborted()
+            if line_ctx.abort_signal is not None:
+                line_ctx.abort_signal.throw_if_aborted()
             if authority.type == "task":
                 # A captured runtime cannot write after its invocation returned,
                 # after terminalization, or after a mark (run mode).

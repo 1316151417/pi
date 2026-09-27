@@ -291,7 +291,7 @@ async def _summarize_now(
                 message = event.error
                 break
     except Exception as error:  # noqa: BLE001 - classified as a failed attempt
-        if ctx.signal is not None and ctx.signal.aborted:
+        if ctx.abort_signal is not None and ctx.abort_signal.aborted:
             raise
         return _after_failure(base, None, str(error), runtime)
     if message is None:

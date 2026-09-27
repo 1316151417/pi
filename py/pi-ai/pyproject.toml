@@ -1,13 +1,19 @@
 [project]
 name = "pi-ai"
 version = "0.85.1"
-description = "Python port of @earendil-works/pi-ai (dependency surface): LLM provider abstraction, message types, and streaming"
+description = "Python port of pi-ai: LLM provider abstraction, message types, and streaming"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "pi contributors" }]
 keywords = ["ai", "llm", "streaming", "providers"]
-dependencies = ["httpx==0.28.1"]
+dependencies = ["httpx==0.28.1", "ada-url==4.0.0", "regex==2025.7.34", "pi-telemetry==0.85.1"]
+
+[project.scripts]
+pi-ai = "pi_ai.cli:entrypoint"
+
+[tool.uv.sources]
+pi-telemetry = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

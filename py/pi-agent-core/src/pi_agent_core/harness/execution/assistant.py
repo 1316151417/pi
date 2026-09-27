@@ -90,7 +90,7 @@ def _create_request_options(
         "metadata": _opt(options, "metadata"),
         "cacheRetention": _opt(options, "cache_retention", "cacheRetention"),
         "deferred": _opt(options, "deferred"),
-        "signal": context.signal,
+        "signal": context.abort_signal,
         "telemetryContext": get_telemetry_context(context),
     }
     if config.thinking_level != "off":

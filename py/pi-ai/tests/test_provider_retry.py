@@ -100,13 +100,13 @@ def test_retry_after_seconds_is_converted():
 
 
 def test_retry_after_http_date_is_resolved_against_now():
-    """An HTTP-date hint becomes the remaining wait, never negative."""
+    """A past HTTP-date keeps the signed TS delay; the timer clamps it to zero."""
     error = ProviderHttpError(
         status=429,
         headers={"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"},  # far in the past
         message="slow down",
     )
-    assert retry_delay_ms(error, 0) == 0
+    assert retry_delay_ms(error, 0) < 0
 
 
 def test_exponential_backoff_grows_and_is_jittered():
@@ -122,7 +122,7 @@ def test_server_delay_above_the_ceiling_fails_instead_of_blocking():
     error = ProviderHttpError(
         status=429, headers={"retry-after": "600"}, message="come back later"
     )
-    with pytest.raises(ProviderHttpError, match="Server requested 600s retry delay"):
+    with pytest.raises(RuntimeError, match="Server requested 600s retry delay"):
         retry_delay_ms(error, 0, max_retry_delay_ms=1000)
 
     # The ceiling is configurable, and 0 disables it entirely.

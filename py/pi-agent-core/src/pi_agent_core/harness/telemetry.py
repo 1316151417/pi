@@ -1,22 +1,50 @@
-"""Agent telemetry ported from ``harness/telemetry.ts``.
+"""Agent telemetry schemas and context-bound starters from ``harness/telemetry.ts``.
 
-The TypeScript module re-exports its span vocabulary from
-``@earendil-works/pi-telemetry`` and declares two runtime schemas: the AI
-request schema and the harness schema. The Python port has no separate
-pi-telemetry package yet, so the vocabulary this module uses (attribute values,
-span and status shapes, the shared no-op context, and the in-memory recording
-context) lives in the first two sections below; the schemas and the typed span
-starters follow the TypeScript file one-to-one.
+Core telemetry contracts, recording, and no-op behavior come from pi-telemetry.
+The schema descriptions, attribute definitions, parents, and status policies
+are the declarations in the TypeScript module; no runtime validation is added.
 """
 
 from __future__ import annotations
 
-import inspect
-from dataclasses import dataclass, field, replace
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Tuple, Union
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Literal, cast, overload
 
-from .._chord.context import Context
-from . import context as _context
+from pi_telemetry import (
+    AttributeValue, ExactTelemetryAttributes, InMemoryTelemetryContext,
+    NOOP_TELEMETRY_CONTEXT, RecordedTelemetryEvent, RecordedTelemetrySpan,
+    SchemaTelemetrySpan, SpanAttributes, SpanCallback, SpanError, SpanOptions,
+    SpanStatus, TelemetryAttributeDefinition, TelemetryAttributeMetadata,
+    TelemetryAttributeType, TelemetryContext, TelemetryEventAttributeDefinition,
+    TelemetryEventDefinition, TelemetryParentDefinition, TelemetrySchemaDefinition,
+    TelemetrySchemaSpanEndAttributes, TelemetrySchemaSpanEventAttributes,
+    TelemetrySchemaSpanEventName, TelemetrySchemaSpanName,
+    TelemetrySchemaSpanStartAttributes, TelemetrySchemaSpanUnion, TelemetrySpan,
+    TelemetrySpanDefinition, TelemetrySpanStatusDefinition,
+    TelemetryStartAttributeDefinition, TypedSpanStarter,
+)
+from pi_telemetry.noop import _NoopTelemetrySpan as NoopTelemetrySpan
+
+from ._telemetry_types import (
+    AgentTelemetrySpan, AiSpan, AiSpanAttributes, AiSpanEndAttributes,
+    AiSpanEventAttributes, AiSpanEventName, AiSpanName, AiSpanStartAttributes,
+    AiTelemetrySpan, AiRequestStartAttributes, CompactionSpanEndAttributes,
+    CompactionSpanStartAttributes, CheckpointSpanStartAttributes,
+    EmptySpanEndAttributes, EventHandlerSpanStartAttributes, HarnessEventType,
+    HarnessSpan, HarnessSpanAttributes, HarnessSpanEndAttributes,
+    HarnessSpanEventAttributes, HarnessSpanEventName, HarnessSpanName,
+    HarnessSpanStartAttributes, HarnessTelemetrySpan, HookName,
+    HookSpanEndAttributes, HookSpanStartAttributes, NavigationSpanEndAttributes,
+    NavigationSpanStartAttributes, RunSpanEndAttributes, RunSpanStartAttributes,
+    SessionWriteSpanEndAttributes, SessionWriteSpanStartAttributes,
+    SleepSpanEndAttributes, SleepSpanStartAttributes, StepSpanEndAttributes,
+    StepSpanStartAttributes, ToolSpanEndAttributes, ToolSpanStartAttributes,
+    TurnSpanStartAttributes,
+)
+from .context import Context, get_telemetry_context, with_telemetry_context
+
+# Preserve the previously public no-op names as aliases of the common backend.
+NOOP_TELEMETRY_SPAN = cast(TelemetrySpan, NOOP_TELEMETRY_CONTEXT)
 
 __all__ = [
     # pi-telemetry vocabulary
@@ -76,387 +104,47 @@ __all__ = [
     "start_harness_span",
 ]
 
-# ---------------------------------------------------------------------------
-# pi-telemetry vocabulary (``@earendil-works/pi-telemetry`` index.ts / noop.ts)
-# ---------------------------------------------------------------------------
 
-AttributeValue = Union[str, float, bool, List[str], List[float], List[bool]]
-SpanAttributes = Dict[str, Optional[AttributeValue]]
-SpanCallback = Callable[["TelemetrySpan"], Any]
+__all__ += [
+    "TelemetrySchemaSpanEndAttributes", "TelemetrySchemaSpanEventAttributes",
+    "TelemetrySchemaSpanEventName", "TelemetrySchemaSpanName",
+    "TelemetrySchemaSpanStartAttributes", "TelemetrySchemaSpanUnion",
+]
 
 
-@dataclass
-class SpanError:
-    """Structured error recorded on an unsuccessful span."""
-
-    name: str = ""
-    message: str = ""
-
-
-@dataclass
-class SpanStatus:
-    """Span outcome. ``error`` is ignored unless ``status == "error"``."""
-
-    status: str = "ok"  # "ok" | "error"
-    error: Optional[SpanError] = None
-
-
-@dataclass
-class SpanOptions:
-    name: str
-    attributes: Optional[SpanAttributes] = None
-
-
-class TelemetrySpan(Protocol):
-    """One active telemetry span, which is itself a context for child spans."""
-
-    def start_span(self, options: SpanOptions, callback: SpanCallback) -> Awaitable[Any]:
-        """Run ``callback`` inside a child span and settle the child afterwards."""
-        ...
-
-    def add_event(self, name: str, attributes: Optional[SpanAttributes] = None) -> None: ...
-
-    def set_attributes(self, attributes: SpanAttributes) -> None: ...
-
-    def set_status(self, status: SpanStatus) -> None: ...
-
-
-class TelemetryContext(Protocol):
-    """Factory for top-level spans of one telemetry backend."""
-
-    def start_span(self, options: SpanOptions, callback: SpanCallback) -> Awaitable[Any]: ...
-
-
-async def _resolve(value: Any) -> Any:
-    """Await callback results that are awaitable and pass through plain values."""
-    if inspect.isawaitable(value):
-        return await value
-    return value
-
-
-class NoopTelemetrySpan:
-    """Span used when an application does not provide a telemetry backend.
-
-    Mirrors the frozen ``noopTelemetrySpan`` from pi-telemetry ``noop.ts``:
-    callbacks still run, nothing is recorded, and only the callback result
-    matters.
-    """
-
-    __slots__ = ()
-
-    async def start_span(self, options: SpanOptions, callback: SpanCallback) -> Any:
-        return await _resolve(callback(self))
-
-    def add_event(self, name: str, attributes: Optional[SpanAttributes] = None) -> None:
-        return None
-
-    def set_attributes(self, attributes: SpanAttributes) -> None:
-        return None
-
-    def set_status(self, status: SpanStatus) -> None:
-        return None
-
-
-NOOP_TELEMETRY_SPAN = NoopTelemetrySpan()
-
-#: Shared telemetry context used when an application does not provide one.
-NOOP_TELEMETRY_CONTEXT: TelemetryContext = NOOP_TELEMETRY_SPAN
-
-
-# ---------------------------------------------------------------------------
-# In-memory telemetry (``@earendil-works/pi-telemetry`` memory.ts)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class RecordedTelemetryEvent:
-    """Detached snapshot of one span event."""
-
-    name: str
-    attributes: SpanAttributes = field(default_factory=dict)
-
-
-@dataclass
-class RecordedTelemetrySpan:
-    """Detached snapshot of one recorded span."""
-
-    id: int
-    parent_id: Optional[int]
-    name: str
-    attributes: SpanAttributes = field(default_factory=dict)
-    events: List[RecordedTelemetryEvent] = field(default_factory=list)
-    status: SpanStatus = field(default_factory=SpanStatus)
-    settled: bool = False
-    end_sequence: Optional[int] = None
-
-
-@dataclass
-class _MutableRecordedSpan:
-    id: int
-    parent_id: Optional[int]
-    name: str
-    attributes: SpanAttributes
-    events: List[RecordedTelemetryEvent]
-    status: SpanStatus
-    explicit_status: bool
-    settled: bool
-    end_sequence: Optional[int] = None
-
-
-@dataclass
-class _InMemoryTelemetryState:
-    spans: List[_MutableRecordedSpan] = field(default_factory=list)
-    next_span_id: int = 1
-    next_end_sequence: int = 1
-
-
-def _copy_attribute_value(value: AttributeValue) -> AttributeValue:
-    return list(value) if isinstance(value, list) else value
-
-
-def _copy_attributes(attributes: Optional[SpanAttributes]) -> SpanAttributes:
-    copy: SpanAttributes = {}
-    if not attributes:
-        return copy
-    for name, value in attributes.items():
-        if value is not None:
-            copy[name] = _copy_attribute_value(value)
-    return copy
-
-
-def _merge_attributes(current: SpanAttributes, attributes: SpanAttributes) -> SpanAttributes:
-    merged = _copy_attributes(current)
-    for name, value in attributes.items():
-        if value is not None:
-            merged[name] = _copy_attribute_value(value)
-    return merged
-
-
-def _copy_status(status: SpanStatus) -> SpanStatus:
-    if status.status == "ok":
-        return SpanStatus(status="ok")
-    if status.error is None:
-        return SpanStatus(status="error")
-    return SpanStatus(status="error", error=SpanError(name=status.error.name, message=status.error.message))
-
-
-def _automatic_error_status(error: Any) -> SpanStatus:
-    if isinstance(error, BaseException):
-        name = getattr(error, "name", None) or type(error).__name__
-        return SpanStatus(status="error", error=SpanError(name=name, message=str(error)))
-    return SpanStatus(status="error")
-
-
-def _settle_span(state: _InMemoryTelemetryState, span: _MutableRecordedSpan, failed: bool, error: Any = None) -> None:
-    if span.settled:
-        return
-    if failed and not span.explicit_status:
-        span.status = _automatic_error_status(error)
-    span.settled = True
-    span.end_sequence = state.next_end_sequence
-    state.next_end_sequence += 1
-
-
-def _create_span(
-    state: _InMemoryTelemetryState,
-    parent: Optional[_MutableRecordedSpan],
-    options: SpanOptions,
-) -> _MutableRecordedSpan:
-    span = _MutableRecordedSpan(
-        id=state.next_span_id,
-        parent_id=parent.id if parent is not None else None,
-        name=options.name,
-        attributes=_copy_attributes(options.attributes),
-        events=[],
-        status=SpanStatus(status="ok"),
-        explicit_status=False,
-        settled=False,
-    )
-    state.next_span_id += 1
-    return span
-
-
-async def _start_in_memory_span(
-    state: _InMemoryTelemetryState,
-    parent: Optional[_MutableRecordedSpan],
-    options: SpanOptions,
-    callback: SpanCallback,
-) -> Any:
-    if parent is not None and parent.settled:
-        return await NOOP_TELEMETRY_CONTEXT.start_span(options, callback)
-
-    recorded = _create_span(state, parent, options)
-    state.spans.append(recorded)
-
-    span = _InMemorySpan(state, recorded)
-
-    try:
-        result = callback(span)
-    except BaseException as error:
-        _settle_span(state, recorded, True, error)
-        raise
-
-    try:
-        value = await _resolve(result)
-    except BaseException as error:
-        _settle_span(state, recorded, True, error)
-        raise
-    _settle_span(state, recorded, False)
-    return value
-
-
-class _InMemorySpan:
-    """Live span handle writing into one in-memory recording state."""
-
-    __slots__ = ("_state", "_span")
-
-    def __init__(self, state: _InMemoryTelemetryState, span: _MutableRecordedSpan) -> None:
-        self._state = state
-        self._span = span
-
-    def start_span(self, options: SpanOptions, callback: SpanCallback) -> Awaitable[Any]:
-        return _start_in_memory_span(self._state, self._span, options, callback)
-
-    def add_event(self, name: str, attributes: Optional[SpanAttributes] = None) -> None:
-        if self._span.settled:
-            return
-        self._span.events.append(RecordedTelemetryEvent(name=name, attributes=_copy_attributes(attributes)))
-
-    def set_attributes(self, attributes: SpanAttributes) -> None:
-        if self._span.settled:
-            return
-        self._span.attributes = _merge_attributes(self._span.attributes, attributes)
-
-    def set_status(self, status: SpanStatus) -> None:
-        if self._span.settled:
-            return
-        self._span.status = _copy_status(status)
-        self._span.explicit_status = True
-
-
-class InMemoryTelemetryContext:
-    """Backend-neutral recorder keeping spans in process memory.
-
-    Create a fresh instance to isolate tests or independent recording scopes.
-    """
-
-    def __init__(self) -> None:
-        self._state = _InMemoryTelemetryState()
-
-    def start_span(self, options: SpanOptions, callback: SpanCallback) -> Awaitable[Any]:
-        return _start_in_memory_span(self._state, None, options, callback)
-
-    def get_spans(self) -> List[RecordedTelemetrySpan]:
-        """Return detached snapshots in span-start order."""
-        return [
-            RecordedTelemetrySpan(
-                id=span.id,
-                parent_id=span.parent_id,
-                name=span.name,
-                attributes=_copy_attributes(span.attributes),
-                events=[
-                    RecordedTelemetryEvent(name=event.name, attributes=_copy_attributes(event.attributes))
-                    for event in span.events
-                ],
-                status=_copy_status(span.status),
-                settled=span.settled,
-                end_sequence=span.end_sequence,
-            )
-            for span in self._state.spans
-        ]
-
-
-# ---------------------------------------------------------------------------
-# Schema vocabulary (``@earendil-works/pi-telemetry`` index.ts)
-# ---------------------------------------------------------------------------
-
-TelemetryAttributeType = str  # "string" | "number" | "boolean" | "string[]" | "number[]" | "boolean[]"
-
-
-@dataclass
-class TelemetryAttributeMetadata:
-    description: str = ""
-    sensitive: bool = False
-    cardinality: Optional[str] = None  # "low" | "high"
-
-
-@dataclass
-class TelemetryAttributeDefinition(TelemetryAttributeMetadata):
-    type: TelemetryAttributeType = "string"
-    values: Optional[Sequence[Any]] = None
-    element_values: Optional[Sequence[Any]] = None
-    examples: Optional[Sequence[Any]] = None
-
-
-@dataclass
-class TelemetryStartAttributeDefinition(TelemetryAttributeDefinition):
-    required: bool = False
-
-
-#: Event attributes share the required/optional shape of start attributes.
-TelemetryEventAttributeDefinition = TelemetryStartAttributeDefinition
-
-
-@dataclass
-class TelemetryEventDefinition:
-    description: str = ""
-    attributes: Dict[str, TelemetryEventAttributeDefinition] = field(default_factory=dict)
-
-
-@dataclass
-class TelemetryParentDefinition:
-    kind: str = "any"  # "any" | "root_or_external" | "spans"
-    spans: Optional[List[str]] = None
-
-
-@dataclass
-class TelemetrySpanStatusDefinition:
-    default: str = "ok"
-    error_when: str = ""
-
-
-@dataclass
-class TelemetrySpanDefinition:
-    description: str = ""
-    parents: TelemetryParentDefinition = field(default_factory=TelemetryParentDefinition)
-    start_attributes: Dict[str, TelemetryStartAttributeDefinition] = field(default_factory=dict)
-    end_attributes: Dict[str, TelemetryAttributeDefinition] = field(default_factory=dict)
-    events: Optional[Dict[str, TelemetryEventDefinition]] = None
-    status: TelemetrySpanStatusDefinition = field(default_factory=TelemetrySpanStatusDefinition)
-
-
-@dataclass
-class TelemetrySchemaDefinition:
-    version: int = 1
-    spans: Dict[str, TelemetrySpanDefinition] = field(default_factory=dict)
-
-
-#: Expected attributes of one span start call. The TypeScript ``ExactTelemetryAttributes``
-#: rejects unknown keys at compile time; the Python port relies on the schema only.
-ExactTelemetryAttributes = Dict[str, Any]
-#: Typed span handed to schema callbacks (a span plus its schema-bound attribute names).
-SchemaTelemetrySpan = TelemetrySpan
-#: ``(name, attributes, callback) -> awaitable`` bound to one schema vocabulary.
-TypedSpanStarter = Callable[..., Awaitable[Any]]
-
-
-def _parents(kind: str, spans: Optional[Sequence[str]] = None) -> TelemetryParentDefinition:
+def _parents(
+    kind: Literal["any", "root_or_external", "spans"],
+    spans: Sequence[str] | None = None,
+) -> TelemetryParentDefinition:
     return TelemetryParentDefinition(kind=kind, spans=list(spans) if spans is not None else None)
 
 
 def _start(
-    type: TelemetryAttributeType, description: str, required: bool, **options: Any
+    type: TelemetryAttributeType,
+    description: str,
+    required: bool,
+    *,
+    cardinality: Literal["low", "high"] | None = None,
+    values: Sequence[str] | None = None,
+    element_values: Sequence[str] | None = None,
 ) -> TelemetryStartAttributeDefinition:
-    return TelemetryStartAttributeDefinition(type=type, description=description, required=required, **options)
+    return TelemetryStartAttributeDefinition(
+        type=type, description=description, required=required, cardinality=cardinality,
+        values=values, element_values=element_values,
+    )
 
 
-def _end(type: TelemetryAttributeType, description: str, **options: Any) -> TelemetryAttributeDefinition:
-    return TelemetryAttributeDefinition(type=type, description=description, **options)
+def _end(
+    type: TelemetryAttributeType,
+    description: str,
+    *,
+    cardinality: Literal["low", "high"] | None = None,
+    values: Sequence[str] | None = None,
+) -> TelemetryAttributeDefinition:
+    return TelemetryAttributeDefinition(
+        type=type, description=description, cardinality=cardinality, values=values,
+    )
 
-
-# ---------------------------------------------------------------------------
-# AI request schema
-# ---------------------------------------------------------------------------
 
 AI_TELEMETRY_SCHEMA = TelemetrySchemaDefinition(
     version=1,
@@ -515,7 +203,7 @@ AI_TELEMETRY_SCHEMA = TelemetrySchemaDefinition(
 # Harness schema
 # ---------------------------------------------------------------------------
 
-HOOK_NAMES: Tuple[str, ...] = (
+HOOK_NAMES: tuple[HookName, ...] = (
     "before_run",
     "before_drive",
     "before_run_end",
@@ -529,7 +217,7 @@ HOOK_NAMES: Tuple[str, ...] = (
     "before_navigation",
 )
 
-EVENT_TYPES: Tuple[str, ...] = (
+EVENT_TYPES: tuple[HarnessEventType, ...] = (
     "run_start",
     "run_resume",
     "run_suspend",
@@ -560,14 +248,14 @@ EVENT_TYPES: Tuple[str, ...] = (
     "usage",
 )
 
-_OPERATION_START_ATTRIBUTES: Dict[str, TelemetryStartAttributeDefinition] = {
+_OPERATION_START_ATTRIBUTES: dict[str, TelemetryStartAttributeDefinition] = {
     "pi.session.id": _start("string", "Session id", True, cardinality="high"),
     "pi.lane.name": _start("string", "Lane name", True, cardinality="high"),
     "pi.operation.id": _start("string", "Durable operation id", True, cardinality="high"),
     "pi.operation.recovery": _start("boolean", "Whether this invocation resumes durable work", True),
 }
 
-_OPERATION_ERROR_ATTRIBUTES: Dict[str, TelemetryAttributeDefinition] = {
+_OPERATION_ERROR_ATTRIBUTES: dict[str, TelemetryAttributeDefinition] = {
     "pi.error.code": _end("string", "Stable operation error code", cardinality="low"),
     "pi.error.type": _end("string", "Low-cardinality operation error class", cardinality="low"),
 }
@@ -778,67 +466,60 @@ HARNESS_TELEMETRY_SCHEMA = TelemetrySchemaDefinition(
 )
 
 #: Combined typed span vocabulary for agent-owned AI-request and harness telemetry.
-AGENT_TELEMETRY_SCHEMAS: Tuple[TelemetrySchemaDefinition, ...] = (
+AGENT_TELEMETRY_SCHEMAS: tuple[TelemetrySchemaDefinition, ...] = (
     AI_TELEMETRY_SCHEMA,
     HARNESS_TELEMETRY_SCHEMA,
 )
 
-
-# ---------------------------------------------------------------------------
-# Schema-derived aliases
-# ---------------------------------------------------------------------------
-
-AiSpanName = str
-AiSpanStartAttributes = Dict[str, Any]
-AiSpanEndAttributes = Dict[str, Any]
-AiSpanAttributes = Dict[str, Any]
-AiSpanEventName = str
-AiSpanEventAttributes = Dict[str, Any]
-AiTelemetrySpan = TelemetrySpan
-AiSpan = Dict[str, Any]
-
-HarnessSpanName = str
-HarnessSpanStartAttributes = Dict[str, Any]
-HarnessSpanEndAttributes = Dict[str, Any]
-HarnessSpanAttributes = Dict[str, Any]
-HarnessSpanEventName = str
-HarnessSpanEventAttributes = Dict[str, Any]
-HarnessTelemetrySpan = TelemetrySpan
-HarnessSpan = Dict[str, Any]
-
-
-# ---------------------------------------------------------------------------
-# Typed span starters
-# ---------------------------------------------------------------------------
-
-
-async def start_ai_span(
+def start_ai_span[Result](
     name: AiSpanName,
-    attributes: ExactTelemetryAttributes,
-    callback: Callable[[AiTelemetrySpan, Context], Any],
+    attributes: AiRequestStartAttributes,
+    callback: Callable[[AiTelemetrySpan[AiSpanName], Context], Result | Awaitable[Result]],
     context: Context,
-) -> Any:
-    """Start one ``pi.ai.*`` span through the telemetry parent attached to ``context``."""
-
-    def invoke(span: TelemetrySpan) -> Any:
-        return callback(span, _context.with_telemetry_context(span, context))
-
-    return await _context.get_telemetry_context(context).start_span(
-        SpanOptions(name=name, attributes=attributes), invoke
+) -> Awaitable[Result]:
+    """Start immediately beneath the explicit telemetry parent in ``context``."""
+    return get_telemetry_context(context).start_span(
+        SpanOptions(name=name, attributes=cast(SpanAttributes, attributes)),
+        lambda span: callback(cast(AiTelemetrySpan[AiSpanName], span), with_telemetry_context(span, context)),
     )
 
 
-async def start_harness_span(
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.run"], attributes: RunSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[RunSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.compaction"], attributes: CompactionSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[CompactionSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.navigation"], attributes: NavigationSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[NavigationSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.checkpoint"], attributes: CheckpointSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[EmptySpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.turn"], attributes: TurnSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[EmptySpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.step"], attributes: StepSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[StepSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.tool"], attributes: ToolSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[ToolSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.hook"], attributes: HookSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[HookSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.sleep"], attributes: SleepSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[SleepSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.harness.event_handler"], attributes: EventHandlerSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[EmptySpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+@overload
+def start_harness_span[Result](name: Literal["pi.session.write"], attributes: SessionWriteSpanStartAttributes, callback: Callable[[AgentTelemetrySpan[SessionWriteSpanEndAttributes], Context], Result | Awaitable[Result]], context: Context) -> Awaitable[Result]: ...
+
+
+def start_harness_span[Result](
     name: HarnessSpanName,
-    attributes: ExactTelemetryAttributes,
-    callback: Callable[[HarnessTelemetrySpan, Context], Any],
+    attributes: HarnessSpanStartAttributes[HarnessSpanName],
+    callback: Callable[..., Result | Awaitable[Result]],
     context: Context,
-) -> Any:
-    """Start one ``pi.harness.*`` span through the telemetry parent attached to ``context``."""
+) -> Awaitable[Result]:
+    """Start one schema span and pass its parent-bound context to the callback.
 
-    def invoke(span: TelemetrySpan) -> Any:
-        return callback(span, _context.with_telemetry_context(span, context))
-
-    return await _context.get_telemetry_context(context).start_span(
-        SpanOptions(name=name, attributes=attributes), invoke
+    Per-name callback types are expressed by the overloads. The implementation
+    forwards the exact backend handle, result, and awaitable without wrapping.
+    """
+    return get_telemetry_context(context).start_span(
+        SpanOptions(name=name, attributes=cast(SpanAttributes, attributes)),
+        lambda span: callback(span, with_telemetry_context(span, context)),
     )

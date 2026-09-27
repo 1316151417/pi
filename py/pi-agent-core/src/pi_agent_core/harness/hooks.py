@@ -112,8 +112,8 @@ class HookRegistry:
 
         async def _admitted() -> Any:
             admitted_context = with_abort_signal(gate.signal, context)
-            if admitted_context.signal is not None:
-                admitted_context.signal.throw_if_aborted()
+            if admitted_context.abort_signal is not None:
+                admitted_context.abort_signal.throw_if_aborted()
             return await self._run_admitted(name, event, admitted_context)
 
         return await gate.admit(_admitted)
@@ -125,8 +125,8 @@ class HookRegistry:
 
         async def _admitted() -> Any:
             admitted_context = with_abort_signal(gate.signal, context)
-            if admitted_context.signal is not None:
-                admitted_context.signal.throw_if_aborted()
+            if admitted_context.abort_signal is not None:
+                admitted_context.abort_signal.throw_if_aborted()
             if name == "before_tool":
                 return await self._before_tool(event, admitted_context)
             return await self._after_tool(event, admitted_context)

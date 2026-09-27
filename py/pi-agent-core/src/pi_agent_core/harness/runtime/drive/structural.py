@@ -911,7 +911,7 @@ def _request_stream_options(
         "metadata": _opt(stream_options, "metadata"),
         "cacheRetention": "none",
         "deferred": False,
-        "signal": context.signal,
+        "signal": context.abort_signal,
         "telemetryContext": get_telemetry_context(context),
         "onPayload": on_payload,
     }

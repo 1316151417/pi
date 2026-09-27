@@ -228,7 +228,7 @@ async def perform_deferred_poll(
             prepared.source,
             {
                 "wait": 0,
-                "signal": admitted.signal,
+                "signal": admitted.abort_signal,
                 "telemetryContext": get_telemetry_context(admitted),
                 "timeoutMs": _opt(options, "timeout_ms", "timeoutMs"),
                 "maxRetries": _opt(options, "max_retries", "maxRetries"),

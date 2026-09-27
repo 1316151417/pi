@@ -267,7 +267,7 @@ from .harness.utils.truncate import (
     truncate_tail,
 )
 from .harness.utils.usage import add_usage, empty_usage
-from .proxy import ProxyStreamOptions, stream_proxy
+from .proxy import ProxyAssistantMessageEvent, ProxyStreamOptions, stream_proxy
 from .search import EntrySearchHit, SearchQuery, SessionSearchHit, SessionSearchService
 from .stream_fn import get_default_stream_fn, set_default_stream_fn
 from .types import (
@@ -508,6 +508,7 @@ __all__ = [
     "PrepareNextTurnContext",
     "PromptTemplate",
     "Provider",
+    "ProxyAssistantMessageEvent",
     "ProxyStreamOptions",
     "QueueMode",
     "RecordedTelemetryEvent",

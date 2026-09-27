@@ -11,16 +11,20 @@ dataclass or the plain wire mapping the durable value store yields after replay.
 from __future__ import annotations
 
 import copy
-import json
+import math
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Mapping, Optional, Tuple, Union
+from typing import Iterable, List, Mapping, Optional, Tuple, Union, cast
 
+from ._javascript import javascript_json_stringify, utf16_length
+from ._json_runtime import utf16_units
+from ._values import JSON_NULL, JsonNull
 from .json_parse import parse_streaming_json
 from .types import (
     AssistantContentBlock,
     AssistantMessage,
     AssistantMessageEvent,
     JsonObject,
+    JsonValue,
     TextContent,
     ThinkingContent,
     ToolCall,
@@ -46,11 +50,13 @@ class AssistantMessageFrame:
     Terminal settlement is intentionally excluded and must be persisted separately.
     ``content`` holds a content block for ``text_start``/``thinking_start`` frames and
     the authoritative block text for ``text_end``/``thinking_end`` frames.
+    ``arguments=JSON_NULL`` represents an explicit JSON null; ``None`` retains
+    the existing Python convention for an omitted frame field.
     """
 
     type: str
     partial: Optional[AssistantMessage] = None
-    content_index: Optional[int] = None
+    content_index: int | float | None = None
     content: Optional[Union[TextContent, ThinkingContent, str]] = None
     delta: Optional[str] = None
     text_signature: Optional[str] = None
@@ -60,7 +66,7 @@ class AssistantMessageFrame:
     json: Optional[str] = None
     id: Optional[str] = None
     name: Optional[str] = None
-    arguments: Optional[JsonObject] = None
+    arguments: JsonValue | JsonNull = None
     thought_signature: Optional[str] = None
     namespace: Optional[str] = None
 
@@ -89,7 +95,7 @@ class AssistantMessageFrame:
         if self.name is not None:
             data["name"] = self.name
         if self.arguments is not None:
-            data["arguments"] = copy.deepcopy(self.arguments)
+            data["arguments"] = None if self.arguments is JSON_NULL else copy.deepcopy(cast(JsonValue, self.arguments))
         if self.thought_signature is not None:
             data["thoughtSignature"] = self.thought_signature
         if self.namespace is not None:
@@ -97,7 +103,7 @@ class AssistantMessageFrame:
         return data
 
 
-def frame_from_json(data: Mapping[str, Any]) -> AssistantMessageFrame:
+def frame_from_json(data: Mapping[str, object]) -> AssistantMessageFrame:
     """Decode one stored assistant-message frame from its wire shape."""
     partial = data.get("partial")
     tool_call = data.get("toolCall")
@@ -105,21 +111,24 @@ def frame_from_json(data: Mapping[str, Any]) -> AssistantMessageFrame:
     if isinstance(content, Mapping):
         content = content_block_from_json(content)
     return AssistantMessageFrame(
-        type=data["type"],
-        partial=message_from_json(partial) if partial else None,
-        content_index=data.get("contentIndex"),
-        content=content,
-        delta=data.get("delta"),
-        text_signature=data.get("textSignature"),
-        thinking_signature=data.get("thinkingSignature"),
-        redacted=data.get("redacted"),
-        tool_call=content_block_from_json(tool_call) if tool_call else None,
-        json=data.get("json"),
-        id=data.get("id"),
-        name=data.get("name"),
-        arguments=copy.deepcopy(data.get("arguments")),
-        thought_signature=data.get("thoughtSignature"),
-        namespace=data.get("namespace"),
+        type=cast(str, data["type"]),
+        partial=cast(AssistantMessage, message_from_json(cast(Mapping[str, object], partial))) if partial else None,
+        content_index=cast(int | float | None, data.get("contentIndex")),
+        content=cast(TextContent | ThinkingContent | str | None, content),
+        delta=cast(str | None, data.get("delta")),
+        text_signature=cast(str | None, data.get("textSignature")),
+        thinking_signature=cast(str | None, data.get("thinkingSignature")),
+        redacted=cast(bool | None, data.get("redacted")),
+        tool_call=cast(ToolCall, content_block_from_json(cast(Mapping[str, object], tool_call))) if tool_call else None,
+        json=cast(str | None, data.get("json")),
+        id=cast(str | None, data.get("id")),
+        name=cast(str | None, data.get("name")),
+        arguments=(
+            JSON_NULL if "arguments" in data and data["arguments"] is None
+            else copy.deepcopy(cast(JsonValue, data.get("arguments")))
+        ),
+        thought_signature=cast(str | None, data.get("thoughtSignature")),
+        namespace=cast(str | None, data.get("namespace")),
     )
 
 
@@ -128,15 +137,16 @@ def frame_from_json(data: Mapping[str, Any]) -> AssistantMessageFrame:
 # ---------------------------------------------------------------------------
 
 
-def _assert_content_index(content_index: Optional[int]) -> int:
+def _assert_content_index(content_index: int | float | None) -> int:
     if (
-        not isinstance(content_index, int)
+        not isinstance(content_index, (int, float))
         or isinstance(content_index, bool)
+        or (isinstance(content_index, float) and not content_index.is_integer())
         or content_index < 0
         or content_index > MAX_SAFE_INTEGER
     ):
         raise ValueError(f"Invalid assistant message frame contentIndex: {content_index}")
-    return content_index
+    return int(content_index)
 
 
 def _clone_text_content(content: TextContent) -> TextContent:
@@ -177,28 +187,32 @@ def _clone_start_message(message: AssistantMessage) -> AssistantMessage:
     )
 
 
-def _serialize_arguments(arguments: Any) -> str:
-    try:
-        return json.dumps(arguments, separators=(",", ":"), ensure_ascii=False)
-    except (TypeError, ValueError) as error:
-        raise ValueError("Tool-call arguments are not JSON-serializable") from error
+def _serialize_arguments(arguments: object) -> str:
+    serialized = javascript_json_stringify(arguments)
+    if serialized is None:
+        raise ValueError("Tool-call arguments are not JSON-serializable")
+    return serialized
 
 
-def _is_same_scalar(snapshot: Any, current: Any) -> bool:
+def _is_same_scalar(snapshot: object, current: object) -> bool:
     """``Object.is`` for JSON scalars: booleans are not numbers and ``None`` only matches ``None``."""
     if snapshot is None or current is None:
         return snapshot is None and current is None
     if isinstance(snapshot, bool) or isinstance(current, bool):
         return isinstance(snapshot, bool) and isinstance(current, bool) and snapshot == current
     if isinstance(snapshot, (int, float)) and isinstance(current, (int, float)):
+        if math.isnan(snapshot) and math.isnan(current):
+            return True
+        if snapshot == 0 and current == 0:
+            return math.copysign(1, snapshot) == math.copysign(1, current)
         return snapshot == current
     return snapshot is current
 
 
-def _is_json_prefix(snapshot: Any, current: Any) -> bool:
+def _is_json_prefix(snapshot: JsonValue, current: JsonValue) -> bool:
     """Report whether ``current`` is ``snapshot`` extended by later streamed JSON."""
     if isinstance(snapshot, str):
-        return isinstance(current, str) and current.startswith(snapshot)
+        return isinstance(current, str) and utf16_units(current).startswith(utf16_units(snapshot))
     if isinstance(snapshot, list):
         return (
             isinstance(current, list)
@@ -212,10 +226,14 @@ def _is_json_prefix(snapshot: Any, current: Any) -> bool:
     return all(key in current and _is_json_prefix(value, current[key]) for key, value in snapshot.items())
 
 
-def _require(value: Any, subject: str, field: str) -> Any:
+def _require[T](value: T | None, subject: str, field: str) -> T:
     if value is None:
         raise ValueError(f"{subject} is missing {field}")
     return value
+
+
+def _concat_utf16(left: str, right: str) -> str:
+    return (left + right).encode("utf-16-le", "surrogatepass").decode("utf-16-le", "surrogatepass")
 
 
 def _event_block(event: AssistantMessageEvent) -> AssistantContentBlock:
@@ -298,7 +316,7 @@ class AssistantMessageFrameEncoder:
             content = _event_block(event)
             if not isinstance(content, TextContent):
                 raise ValueError(f"text_start event points to {content.type} block at index {content_index}")
-            self._start_block(content_index, _EncoderTextState(kind="text", covered_chars=len(content.text)))
+            self._start_block(content_index, _EncoderTextState(kind="text", covered_chars=utf16_length(content.text)))
             return AssistantMessageFrame(
                 type="text_start",
                 content_index=content_index,
@@ -325,7 +343,7 @@ class AssistantMessageFrameEncoder:
             content = _event_block(event)
             if not isinstance(content, ThinkingContent):
                 raise ValueError(f"thinking_start event points to {content.type} block at index {content_index}")
-            self._start_block(content_index, _EncoderTextState(kind="thinking", covered_chars=len(content.thinking)))
+            self._start_block(content_index, _EncoderTextState(kind="thinking", covered_chars=utf16_length(content.thinking)))
             return AssistantMessageFrame(
                 type="thinking_start",
                 content_index=content_index,
@@ -380,7 +398,7 @@ class AssistantMessageFrameEncoder:
                 if len(delta) == 0:
                     return None
                 return AssistantMessageFrame(type="toolcall_delta", content_index=content_index, delta=delta)
-            state.catchup_json += delta
+            state.catchup_json = _concat_utf16(state.catchup_json, delta)
             arguments_value = parse_streaming_json(state.catchup_json)
             if _serialize_arguments(arguments_value) != state.snapshot_arguments:
                 # Legacy grammar calls include the initial input in toolcall_start, but their
@@ -410,7 +428,7 @@ class AssistantMessageFrameEncoder:
                 content_index=content_index,
                 id=tool_call.id,
                 name=tool_call.name,
-                arguments=copy.deepcopy(tool_call.arguments),
+                arguments=JSON_NULL if tool_call.arguments is None else copy.deepcopy(tool_call.arguments),
                 thought_signature=tool_call.thought_signature,
                 namespace=tool_call.namespace,
             )
@@ -445,11 +463,15 @@ class AssistantMessageFrameEncoder:
         if not isinstance(state, _EncoderTextState):
             raise ValueError("Unreachable text encoder state")
         delta_start = state.delta_chars
-        state.delta_chars += len(delta)
+        delta_length = utf16_length(delta)
+        state.delta_chars += delta_length
         covered = max(0, state.covered_chars - delta_start)
-        if covered >= len(delta):
+        if covered >= delta_length:
             return None
-        uncovered = delta if covered == 0 else delta[covered:]
+        uncovered = (
+            delta if covered == 0 else
+            delta.encode("utf-16-le", "surrogatepass")[covered * 2:].decode("utf-16-le", "surrogatepass")
+        )
         return AssistantMessageFrame(type=f"{kind}_delta", content_index=content_index, delta=uncovered)
 
 
@@ -504,7 +526,7 @@ def _active_block(
     return block, state
 
 
-def _as_frame(frame: Union[AssistantMessageFrame, Mapping[str, Any]]) -> AssistantMessageFrame:
+def _as_frame(frame: AssistantMessageFrame | Mapping[str, object]) -> AssistantMessageFrame:
     if isinstance(frame, AssistantMessageFrame):
         return frame
     if isinstance(frame, Mapping):
@@ -513,7 +535,7 @@ def _as_frame(frame: Union[AssistantMessageFrame, Mapping[str, Any]]) -> Assista
 
 
 def reduce_assistant_message_frames(
-    frames: Iterable[Union[AssistantMessageFrame, Mapping[str, Any]]],
+    frames: Iterable[AssistantMessageFrame | Mapping[str, object]],
 ) -> Optional[AssistantMessage]:
     """Replay compact frames without mutating them. Returns ``None`` when the
     iterable contains no start frame.
@@ -554,7 +576,7 @@ def reduce_assistant_message_frames(
             )
             if not isinstance(block, TextContent):
                 raise ValueError("Unreachable text frame state")
-            block.text += _require(frame.delta, f"{frame.type} frame", "delta")
+            block.text = _concat_utf16(block.text, _require(frame.delta, f"{frame.type} frame", "delta"))
             continue
         if frame.type == "text_end":
             block, state = _active_block(
@@ -562,7 +584,7 @@ def reduce_assistant_message_frames(
             )
             if not isinstance(block, TextContent):
                 raise ValueError("Unreachable text frame state")
-            block.text = _require(frame.content, f"{frame.type} frame", "content")
+            block.text = cast(str, _require(frame.content, f"{frame.type} frame", "content"))
             block.text_signature = frame.text_signature
             state.ended = True
             continue
@@ -580,7 +602,7 @@ def reduce_assistant_message_frames(
             )
             if not isinstance(block, ThinkingContent):
                 raise ValueError("Unreachable thinking frame state")
-            block.thinking += _require(frame.delta, f"{frame.type} frame", "delta")
+            block.thinking = _concat_utf16(block.thinking, _require(frame.delta, f"{frame.type} frame", "delta"))
             continue
         if frame.type == "thinking_end":
             block, state = _active_block(
@@ -588,7 +610,7 @@ def reduce_assistant_message_frames(
             )
             if not isinstance(block, ThinkingContent):
                 raise ValueError("Unreachable thinking frame state")
-            block.thinking = _require(frame.content, f"{frame.type} frame", "content")
+            block.thinking = cast(str, _require(frame.content, f"{frame.type} frame", "content"))
             block.thinking_signature = frame.thinking_signature
             block.redacted = frame.redacted
             state.ended = True
@@ -613,13 +635,13 @@ def reduce_assistant_message_frames(
                 raise ValueError("Unreachable tool-call checkpoint state")
             json_payload = _require(frame.json, f"{frame.type} frame", "json")
             state.json = json_payload
-            block.arguments = parse_streaming_json(json_payload)
+            block.arguments = cast(JsonObject, parse_streaming_json(json_payload))
             continue
         if frame.type == "toolcall_delta":
             _block, state = _active_block(
                 message, states, _assert_content_index(content_index), "toolCall", frame.type
             )
-            state.json += _require(frame.delta, f"{frame.type} frame", "delta")
+            state.json = _concat_utf16(state.json, _require(frame.delta, f"{frame.type} frame", "delta"))
             continue
         if frame.type == "toolcall_end":
             block, state = _active_block(
@@ -629,7 +651,8 @@ def reduce_assistant_message_frames(
                 raise ValueError("Unreachable tool-call frame state")
             block.id = _require(frame.id, f"{frame.type} frame", "id")
             block.name = _require(frame.name, f"{frame.type} frame", "name")
-            block.arguments = copy.deepcopy(_require(frame.arguments, f"{frame.type} frame", "arguments"))
+            arguments = _require(frame.arguments, f"{frame.type} frame", "arguments")
+            block.arguments = cast(JsonObject, None if arguments is JSON_NULL else copy.deepcopy(arguments))
             block.thought_signature = frame.thought_signature
             block.namespace = frame.namespace
             state.ended = True
@@ -645,12 +668,12 @@ def reduce_assistant_message_frames(
         block = message.content[content_index] if content_index < len(message.content) else None
         if not isinstance(block, ToolCall):
             raise ValueError("Unreachable tool-call frame state")
-        block.arguments = parse_streaming_json(state.json)
+        block.arguments = cast(JsonObject, parse_streaming_json(state.json))
 
     return message
 
 
-def _frame_content_kind(value: Any) -> str:
+def _frame_content_kind(value: object) -> str:
     if value is None:
         return "undefined"
     if isinstance(value, str):

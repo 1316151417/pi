@@ -1,22 +1,28 @@
-"""Tool argument validation and coercion ported from pi-ai ``src/utils/validation.ts``.
+"""Tool validation and coercion from pi-ai ``utils/validation.ts``.
 
-TypeBox schemas are JSON Schema compatible, so this port validates plain JSON
-schema dicts with the same coercion semantics:
+The phases are optional-null normalization, in-place TypeBox conversion, pi's
+JSON-schema conversion, and TypeBox validation. The TypeBox conversion's return
+value is intentionally ignored. Python dictionary schemas use the source's
+plain-JSON-schema path; JavaScript symbol metadata is not a JSON field.
 
-1. ``normalize_optional_nulls`` drops ``null`` values for non-required properties.
-2. ``Value.Convert``-style conversion rewrites primitives to the schema type.
-3. A fallback coercion walks the schema for plain JSON-schema parameters.
-4. Validation errors are reported as ``  - <path>: <message>`` lines like the TS
-   implementation.
+Python dicts cannot be weakly referenced, so the identity cache retains compiled
+schemas for this module's lifetime. TypeBox-specific non-JSON type-programming
+limits are documented in ``_typebox_convert``; ECMAScript regular-expression
+adaptation limits are documented in ``_typebox_regexp``.
 """
 
 from __future__ import annotations
 
-import copy
-import json
-import re
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+import math
+from collections.abc import Sequence
+from typing import cast
 
+from ._javascript import javascript_json_stringify, javascript_string
+from ._json_runtime import JS_WHITESPACE
+from ._typebox_convert import convert
+from ._typebox_primitives import entries, get_property, has_property, is_integer, number_from_string, strict_equal, structured_clone
+from ._typebox_validator import LocalizedError, Validator
+from ._values import UNDEFINED
 from .types import Tool, ToolCall
 
 __all__ = ["validate_tool_call", "validate_tool_arguments", "ValidationError"]
@@ -26,25 +32,49 @@ class ValidationError(ValueError):
     pass
 
 
-# ---------------------------------------------------------------------------
-# JSON type matching
-# ---------------------------------------------------------------------------
+_VALIDATORS: dict[int, tuple[object, Validator]] = {}
 
 
-def _schema_types(schema: Mapping[str, Any]) -> List[str]:
-    type_field = schema.get("type")
-    if isinstance(type_field, str):
-        return [type_field]
-    if isinstance(type_field, list):
-        return [t for t in type_field if isinstance(t, str)]
-    return []
+def _get_validator(schema: object) -> Validator:
+    cached = _VALIDATORS.get(id(schema))
+    if cached is not None and cached[0] is schema:
+        return cached[1]
+    validator = Validator(schema)
+    # WeakMap.set rejects primitive keys, including boolean schemas. The
+    # surrounding getSubSchemaValidator in pi catches that error when probing.
+    if not isinstance(schema, (dict, list)):
+        raise TypeError("Invalid value used as weak map key")
+    _VALIDATORS[id(schema)] = schema, validator
+    return validator
 
 
-def _matches_json_type(value: Any, type_name: str) -> bool:
+def _get_subschema_validator(schema: object) -> Validator | None:
+    try:
+        return _get_validator(schema)
+    except Exception:
+        return None
+
+
+def _field(schema: object, key: str) -> object:
+    if schema is None or schema is UNDEFINED:
+        raise TypeError(f"Cannot read properties of {javascript_string(schema)} (reading '{key}')")
+    return schema.get(key, UNDEFINED) if isinstance(schema, dict) else UNDEFINED
+
+
+def _truthy(value: object) -> bool:
+    return not (value is None or value is UNDEFINED or value is False or isinstance(value, str) and value == "" or isinstance(value, (int, float)) and not isinstance(value, bool) and (value == 0 or isinstance(value, float) and math.isnan(value)))
+
+
+def _schema_types(schema: object) -> list[str]:
+    field = _field(schema, "type")
+    return [field] if isinstance(field, str) else [item for item in field if isinstance(item, str)] if isinstance(field, list) else []
+
+
+def _matches_json_type(value: object, type_name: str) -> bool:
     if type_name == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if type_name == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
+        return is_integer(value)
     if type_name == "boolean":
         return isinstance(value, bool)
     if type_name == "string":
@@ -58,375 +88,213 @@ def _matches_json_type(value: Any, type_name: str) -> bool:
     return False
 
 
-def _js_strict_inequals(a: Any, b: Any) -> bool:
-    """JS ``a !== b``: true when types differ or values differ (bool never equals number)."""
-    if isinstance(a, bool) != isinstance(b, bool):
-        return True
-    return a != b or type(a) is not type(b)
-
-
-# ---------------------------------------------------------------------------
-# Primitive coercion (coercePrimitiveByType)
-# ---------------------------------------------------------------------------
-
-
-def _coerce_primitive_by_type(value: Any, type_name: str) -> Any:
-    if type_name == "number":
+def _coerce_primitive_by_type(value: object, type_name: str) -> object:
+    if type_name in ("number", "integer"):
         if value is None:
             return 0
-        if isinstance(value, str) and value.strip() != "":
-            try:
-                return float(value)
-            except ValueError:
-                return value
+        if isinstance(value, str) and value.strip(JS_WHITESPACE) != "":
+            parsed = number_from_string(value)
+            if math.isfinite(parsed) and (type_name == "number" or parsed.is_integer()):
+                return parsed
         if isinstance(value, bool):
-            return 1 if value else 0
-        return value
-    if type_name == "integer":
-        if value is None:
-            return 0
-        if isinstance(value, str) and value.strip() != "":
-            try:
-                parsed = float(value)
-                if parsed.is_integer():
-                    return int(parsed)
-            except ValueError:
-                pass
-            return value
-        if isinstance(value, bool):
-            return 1 if value else 0
-        return value
-    if type_name == "boolean":
+            return int(value)
+    elif type_name == "boolean":
         if value is None:
             return False
-        if isinstance(value, str):
-            if value == "true":
-                return True
-            if value == "false":
-                return False
-        if isinstance(value, int) and not isinstance(value, bool):
+        if value == "true":
+            return True
+        if value == "false":
+            return False
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
             if value == 1:
                 return True
             if value == 0:
                 return False
-        return value
-    if type_name == "string":
+    elif type_name == "string":
         if value is None:
             return ""
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        if isinstance(value, (int, float)):
-            return str(value)
-        return value
-    if type_name == "null":
-        if value == "" or value == 0 or value is False:
+        if isinstance(value, (int, float, bool)):
+            return javascript_string(value)
+    elif type_name == "null":
+        if strict_equal(value, "") or strict_equal(value, 0) or value is False:
             return None
-        return value
     return value
 
 
-# ---------------------------------------------------------------------------
-# Schema-walking coercion (coerceWithJsonSchema)
-# ---------------------------------------------------------------------------
-
-
-def _coerce_with_json_schema(value: Any, schema: Mapping[str, Any]) -> Any:
-    next_value = value
-
-    for nested in schema.get("allOf") or []:
-        next_value = _coerce_with_json_schema(next_value, nested)
-
-    for key in ("anyOf", "oneOf"):
-        variants = schema.get(key)
-        if isinstance(variants, list):
-            next_value = _coerce_with_union_schema(next_value, variants)
-
-    schema_types = _schema_types(schema)
-    matches_union_member = len(schema_types) > 1 and any(
-        _matches_json_type(next_value, t) for t in schema_types
-    )
-    if len(schema_types) > 0 and not matches_union_member:
-        for schema_type in schema_types:
-            candidate = _coerce_primitive_by_type(next_value, schema_type)
-            if _js_strict_inequals(candidate, next_value):
-                next_value = candidate
-                break
-
-    if "object" in schema_types and isinstance(next_value, dict):
-        _apply_schema_object_coercion(next_value, schema)
-
-    if "array" in schema_types and isinstance(next_value, list):
-        _apply_schema_array_coercion(next_value, schema)
-
-    return next_value
-
-
-def _coerce_with_union_schema(value: Any, schemas: Sequence[Mapping[str, Any]]) -> Any:
+def _coerce_with_union_schema(value: object, schemas: list[object]) -> object:
     for schema in schemas:
-        if not collect_errors(value, schema):
+        validator = _get_subschema_validator(schema)
+        if validator is not None and validator.check(value):
             return value
     for schema in schemas:
-        candidate = _coerce_with_json_schema(copy.deepcopy(value), schema)
-        if not collect_errors(candidate, schema):
+        candidate = _coerce_with_json_schema(structured_clone(value), schema)
+        validator = _get_subschema_validator(schema)
+        if validator is not None and validator.check(candidate):
             return candidate
     return value
 
 
-def _apply_schema_object_coercion(value: Dict[str, Any], schema: Mapping[str, Any]) -> None:
-    properties = schema.get("properties")
-    defined_keys = set(properties.keys()) if isinstance(properties, dict) else set()
-    if isinstance(properties, dict):
-        for key, property_schema in properties.items():
-            if key not in value:
-                continue
-            value[key] = _coerce_with_json_schema(value[key], property_schema)
-    additional = schema.get("additionalProperties")
-    if isinstance(additional, dict):
-        for key, property_value in list(value.items()):
-            if key in defined_keys:
-                continue
-            value[key] = _coerce_with_json_schema(property_value, additional)
+def _coerce_with_json_schema(value: object, schema: object) -> object:
+    next_value = value
+    all_of = _field(schema, "allOf")
+    if isinstance(all_of, list):
+        for nested in all_of:
+            next_value = _coerce_with_json_schema(next_value, nested)
+    for keyword in ("anyOf", "oneOf"):
+        variants = _field(schema, keyword)
+        if isinstance(variants, list):
+            next_value = _coerce_with_union_schema(next_value, variants)
+    types = _schema_types(schema)
+    matched = len(types) > 1 and any(_matches_json_type(next_value, item) for item in types)
+    if types and not matched:
+        for typename in types:
+            candidate = _coerce_primitive_by_type(next_value, typename)
+            if not strict_equal(candidate, next_value):
+                next_value = candidate
+                break
+    if "object" in types and isinstance(next_value, dict):
+        properties = _field(schema, "properties")
+        defined_keys = {name for name, _ in entries(properties)}
+        if _truthy(properties):
+            for name, child in entries(properties):
+                if has_property(next_value, name, False):
+                    next_value[name] = _coerce_with_json_schema(get_property(next_value, name), child)
+        additional = _field(schema, "additionalProperties")
+        if isinstance(additional, (dict, list)):
+            for name, item in entries(next_value):
+                if name not in defined_keys:
+                    next_value[name] = _coerce_with_json_schema(item, additional)
+    if "array" in types and isinstance(next_value, list):
+        items = _field(schema, "items")
+        if isinstance(items, list):
+            for index in range(len(next_value)):
+                if index < len(items) and _truthy(items[index]):
+                    next_value[index] = _coerce_with_json_schema(next_value[index], items[index])
+        elif isinstance(items, dict):
+            for index in range(len(next_value)):
+                next_value[index] = _coerce_with_json_schema(next_value[index], items)
+    return next_value
 
 
-def _apply_schema_array_coercion(value: List[Any], schema: Mapping[str, Any]) -> None:
-    items = schema.get("items")
-    if isinstance(items, list):
-        for index in range(len(value)):
-            if index < len(items):
-                value[index] = _coerce_with_json_schema(value[index], items[index])
-        return
-    if isinstance(items, dict):
-        for index in range(len(value)):
-            value[index] = _coerce_with_json_schema(value[index], items)
-
-
-# ---------------------------------------------------------------------------
-# normalizeOptionalNulls
-# ---------------------------------------------------------------------------
-
-
-def _normalize_optional_nulls(value: Any, schema: Mapping[str, Any]) -> None:
+def _normalize_optional_nulls(value: object, schema: object) -> None:
     if isinstance(value, list):
-        items = schema.get("items")
+        items = _field(schema, "items")
         if isinstance(items, list):
             for index in range(len(value)):
-                if index < len(items):
+                if index < len(items) and _truthy(items[index]):
                     _normalize_optional_nulls(value[index], items[index])
-        elif isinstance(items, dict):
+        elif _truthy(items):
             for item in value:
                 _normalize_optional_nulls(item, items)
         return
     if not isinstance(value, dict):
         return
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
+    properties = _field(schema, "properties")
+    if not _truthy(properties):
         return
-    required = set(schema.get("required") or [])
-    for key, property_schema in properties.items():
-        if key not in value:
+    required_value = _field(schema, "required")
+    required = set(cast(Sequence[str], required_value)) if required_value is not None and required_value is not UNDEFINED else set()
+    for name, child in entries(properties):
+        if not has_property(value, name, False):
             continue
-        if value[key] is None and key not in required and collect_errors(None, property_schema):
-            del value[key]
+        remove = False
+        item = get_property(value, name)
+        if item is None and name not in required and not isinstance(_field(child, "$ref"), str):
+            validator = _get_subschema_validator(child)
+            remove = validator is not None and not validator.check(None)
+        if remove:
+            del value[name]
         else:
-            _normalize_optional_nulls(value[key], property_schema)
+            _normalize_optional_nulls(item, child)
 
 
-# ---------------------------------------------------------------------------
-# Validation core (TypeBox Compile/Check/Errors equivalent)
-# ---------------------------------------------------------------------------
+def _format_validation_path(error: LocalizedError) -> str:
+    path = error.instance_path.removeprefix("/").replace("/", ".")
+    if error.keyword == "required":
+        required = error.params.get("requiredProperties")
+        if isinstance(required, list) and required and required[0]:
+            return f"{path}.{required[0]}" if path else str(required[0])
+    return path or "root"
 
 
-def _enum_matches(value: Any, enum_values: Sequence[Any]) -> bool:
-    for enum_value in enum_values:
-        if not _js_strict_inequals(enum_value, value):
-            return True
-    return False
+def collect_errors(value: object, schema: object, path: str = "$") -> list[tuple[str, str]]:
+    """Preserved Python helper, returning TypeBox messages with legacy root paths."""
+    result: list[tuple[str, str]] = []
+    for error in Validator(schema).errors(value):
+        suffix = _format_validation_path(error)
+        result.append((path if suffix == "root" else f"{path}.{suffix}", error.message))
+    return result
 
 
-def collect_errors(value: Any, schema: Mapping[str, Any], path: str = "$") -> List[Tuple[str, str]]:
-    """Return localized ``(instance_path, message)`` validation errors for ``value``."""
-    errors: List[Tuple[str, str]] = []
-
-    if "$ref" in schema:
-        # Unsupported in the embedded-validator subset; treat as pass-through.
-        return errors
-
-    enum_values = schema.get("enum")
-    if isinstance(enum_values, list):
-        if not _enum_matches(value, enum_values):
-            errors.append((path, f"Expected one of {json.dumps(enum_values)}"))
-        return errors
-
-    const_value = schema.get("const")
-    if const_value is not None and _js_strict_inequals(value, const_value):
-        errors.append((path, f"Expected const value {json.dumps(const_value)}"))
-        return errors
-
-    for key in ("anyOf", "oneOf"):
-        variants = schema.get(key)
-        if isinstance(variants, list):
-            if not any(not collect_errors(value, variant, path) for variant in variants):
-                union_kind = "union" if key == "anyOf" else "intersection"
-                errors.append((path, f"Value does not match {union_kind} schema"))
-            return errors
-
-    schema_types = _schema_types(schema)
-    if schema_types and not any(_matches_json_type(value, t) for t in schema_types):
-        errors.append((path, f"Expected {json.dumps(schema_types[0]) if len(schema_types) == 1 else schema_types}"))
-        return errors
-
-    if isinstance(value, dict):
-        properties = schema.get("properties")
-        required = schema.get("required") or []
-        for name in required:
-            if name not in value:
-                errors.append((f"{path}.{name}", "Required property"))
-        if isinstance(properties, dict):
-            for key, sub_schema in properties.items():
-                if key in value:
-                    errors.extend(collect_errors(value[key], sub_schema, f"{path}.{key}"))
-        additional = schema.get("additionalProperties")
-        if additional is False and isinstance(properties, dict):
-            for key in value:
-                if key not in properties:
-                    errors.append((path, f"Unexpected additional property '{key}'"))
-
-    if isinstance(value, list):
-        items = schema.get("items")
-        min_items = schema.get("minItems")
-        max_items = schema.get("maxItems")
-        if isinstance(min_items, int) and len(value) < min_items:
-            errors.append((path, f"Array must have at least {min_items} items"))
-        if isinstance(max_items, int) and len(value) > max_items:
-            errors.append((path, f"Array must have at most {max_items} items"))
-        if isinstance(items, list):
-            for index, item in enumerate(value):
-                if index < len(items):
-                    errors.extend(collect_errors(item, items[index], f"{path}[{index}]"))
-        elif isinstance(items, dict):
-            for index, item in enumerate(value):
-                errors.extend(collect_errors(item, items, f"{path}[{index}]"))
-
-    if isinstance(value, str):
-        min_length = schema.get("minLength")
-        max_length = schema.get("maxLength")
-        pattern = schema.get("pattern")
-        if isinstance(min_length, int) and len(value) < min_length:
-            errors.append((path, f"String must be at least {min_length} characters"))
-        if isinstance(max_length, int) and len(value) > max_length:
-            errors.append((path, f"String must be at most {max_length} characters"))
-        if isinstance(pattern, str):
-            try:
-                if not re.search(pattern, value):
-                    errors.append((path, f"String does not match pattern {pattern!r}"))
-            except re.error:
-                pass
-
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        minimum = schema.get("minimum")
-        maximum = schema.get("maximum")
-        exclusive_minimum = schema.get("exclusiveMinimum")
-        exclusive_maximum = schema.get("exclusiveMaximum")
-        if isinstance(minimum, (int, float)) and value < minimum:
-            errors.append((path, f"Number must be greater or equal to {minimum}"))
-        if isinstance(maximum, (int, float)) and value > maximum:
-            errors.append((path, f"Number must be less or equal to {maximum}"))
-        if isinstance(exclusive_minimum, (int, float)) and value <= exclusive_minimum:
-            errors.append((path, f"Number must be greater than {exclusive_minimum}"))
-        if isinstance(exclusive_maximum, (int, float)) and value >= exclusive_maximum:
-            errors.append((path, f"Number must be less than {exclusive_maximum}"))
-
-    return errors
+def _pretty_json(value: object) -> str:
+    compact = javascript_json_stringify(value)
+    if compact is None:
+        return "undefined"
+    pieces: list[str] = []
+    depth = 0
+    quoted = False
+    escaped = False
+    for index, char in enumerate(compact):
+        if quoted:
+            pieces.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+            pieces.append(char)
+        elif char in "[{":
+            pieces.append(char)
+            depth += 1
+            if index + 1 < len(compact) and compact[index + 1] not in "]}":
+                pieces.append("\n" + "  " * depth)
+        elif char in "]}":
+            depth -= 1
+            if index and compact[index - 1] not in "[{":
+                pieces.append("\n" + "  " * depth)
+            pieces.append(char)
+        elif char == ",":
+            pieces.append(",\n" + "  " * depth)
+        elif char == ":":
+            pieces.append(": ")
+        else:
+            pieces.append(char)
+    return "".join(pieces)
 
 
-# ---------------------------------------------------------------------------
-# Value.Convert equivalent
-# ---------------------------------------------------------------------------
-
-
-def _convert_value(value: Any, schema: Mapping[str, Any]) -> Any:
-    """Convert value types to the schema types (TypeBox Value.Convert semantics)."""
-    if value is None:
-        return None
-    schema_types = _schema_types(schema)
-    if schema_types and any(_matches_json_type(value, t) for t in schema_types):
-        converted = value
-    elif schema_types:
-        converted = value
-        for type_name in schema_types:
-            candidate = _coerce_primitive_by_type(value, type_name)
-            if _matches_json_type(candidate, type_name) and _js_strict_inequals(candidate, value):
-                converted = candidate
-                break
-    else:
-        converted = value
-
-    if isinstance(converted, dict) and isinstance(schema.get("properties"), dict):
-        for key, sub_schema in schema["properties"].items():
-            if key in converted:
-                converted[key] = _convert_value(converted[key], sub_schema)
-        additional = schema.get("additionalProperties")
-        if isinstance(additional, dict):
-            defined = set(schema["properties"].keys())
-            for key in list(converted.keys()):
-                if key not in defined:
-                    converted[key] = _convert_value(converted[key], additional)
-        return converted
-
-    if isinstance(converted, list):
-        items = schema.get("items")
-        if isinstance(items, list):
-            for index in range(min(len(converted), len(items))):
-                converted[index] = _convert_value(converted[index], items[index])
-        elif isinstance(items, dict):
-            for index in range(len(converted)):
-                converted[index] = _convert_value(converted[index], items)
-        return converted
-
-    return converted
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def validate_tool_call(tools: Sequence[Tool], tool_call: ToolCall) -> Any:
-    tool = next((t for t in tools if t.name == tool_call.name), None)
+def validate_tool_call(tools: Sequence[Tool], tool_call: ToolCall) -> object:
+    tool = next((tool for tool in tools if tool.name == tool_call.name), None)
     if tool is None:
         raise ValidationError(f'Tool "{tool_call.name}" not found')
     return validate_tool_arguments(tool, tool_call)
 
 
-def _format_validation_path(instance_path: str, message: str) -> str:
-    """Mirror formatValidationPath: drop the leading '$', convert '/' to '.'."""
-    if message == "Required property":
-        return instance_path.removeprefix("$").lstrip(".") or "root"
-    path = instance_path.removeprefix("$").lstrip(".")
-    return path or "root"
-
-
-def validate_tool_arguments(tool: Tool, tool_call: ToolCall) -> Any:
-    """Validate tool call arguments against the tool's JSON schema, coercing primitives."""
-    args = copy.deepcopy(tool_call.arguments)
-    if not isinstance(args, dict):
-        args = {} if args is None else args
+def validate_tool_arguments(tool: Tool, tool_call: ToolCall) -> object:
+    args = structured_clone(tool_call.arguments)
     _normalize_optional_nulls(args, tool.parameters)
-    args = _convert_value(args, tool.parameters)
-
-    errors = collect_errors(args, tool.parameters)
-    if not errors:
+    convert(tool.parameters, args)
+    validator = _get_validator(tool.parameters)
+    coerced = _coerce_with_json_schema(args, tool.parameters)
+    if not strict_equal(coerced, args):
+        if isinstance(args, dict) and isinstance(coerced, (dict, list)):
+            args.clear()
+            args.update(entries(coerced))
+        elif isinstance(args, list) and isinstance(coerced, list):
+            # Object.keys deletion leaves the original array length unchanged.
+            original_length = len(args)
+            args[:] = coerced
+            if len(args) < original_length:
+                args.extend([UNDEFINED] * (original_length - len(args)))
+        elif isinstance(args, list) and isinstance(coerced, dict):
+            raise TypeError("A JavaScript array with named own properties has no plain Python list representation")
+        else:
+            # This early return, including returning unvalidated original args
+            # when coercion fails, is part of pi's source behavior.
+            return coerced if validator.check(coerced) else args
+    if validator.check(args):
         return args
-
-    coerced = _coerce_with_json_schema(copy.deepcopy(args), tool.parameters)
-    coerced_errors = collect_errors(coerced, tool.parameters)
-    if not coerced_errors:
-        return coerced
-
-    error_lines = "\n".join(
-        f"  - {_format_validation_path(path, message)}: {message}" for path, message in errors
-    )
-    raise ValidationError(
-        f'Validation failed for tool "{tool_call.name}":\n{error_lines}\n\n'
-        f"Received arguments:\n{json.dumps(tool_call.arguments, indent=2)}"
-    )
+    errors = "\n".join(f"  - {_format_validation_path(error)}: {error.message}" for error in validator.errors(args)) or "Unknown validation error"
+    raise ValidationError(f'Validation failed for tool "{tool_call.name}":\n{errors}\n\nReceived arguments:\n{_pretty_json(tool_call.arguments)}')

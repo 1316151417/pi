@@ -117,7 +117,7 @@ def create_edit_tool() -> AgentHarnessTool:
         path, edits = _validate_edit_input(params)
 
         async def _mutate() -> AgentToolResult:
-            if context.signal is not None and context.signal.aborted:
+            if context.abort_signal is not None and context.abort_signal.aborted:
                 raise RuntimeError("Operation aborted")
             absolute_path = await resolve_tool_path(env, path, context)
             info = await env.file_info(absolute_path, context)
@@ -129,21 +129,21 @@ def create_edit_tool() -> AgentHarnessTool:
             read_result = await env.read_text_file(absolute_path, context)
             if not read_result.ok:
                 raise _edit_access_error(path, read_result.error)
-            if context.signal is not None and context.signal.aborted:
+            if context.abort_signal is not None and context.abort_signal.aborted:
                 raise RuntimeError("Operation aborted")
 
             bom, content = strip_bom(read_result.value)
             original_ending = detect_line_ending(content)
             normalized_content = normalize_to_lf(content)
             applied = apply_edits_to_normalized_content(normalized_content, edits, path)
-            if context.signal is not None and context.signal.aborted:
+            if context.abort_signal is not None and context.abort_signal.aborted:
                 raise RuntimeError("Operation aborted")
 
             final_content = bom + restore_line_endings(applied.new_content, original_ending)
             write_result = await env.write_file(absolute_path, final_content, context)
             if not write_result.ok:
                 raise _edit_access_error(path, write_result.error)
-            if context.signal is not None and context.signal.aborted:
+            if context.abort_signal is not None and context.abort_signal.aborted:
                 raise RuntimeError("Operation aborted")
 
             diff_text, first_changed_line = generate_diff_string(applied.base_content, applied.new_content)

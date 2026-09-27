@@ -2,7 +2,12 @@
 
 Python 复刻版 of [`@earendil-works/pi-agent-core`](../../../packages/agent)（TypeScript 原版位于本仓库 `packages/agent`）。
 
-Stateful agent with tool execution and event streaming：拥有会话转录、生命周期事件流、工具执行（串行/并行）、steering / follow-up 队列，以及可插拔的 LLM provider 层。此外完整移植了 `harness/**`：持久化 lane 运行时（`AgentHarness`）、JSONL 会话存储、压缩/分支摘要、事件总线与钩子注册表。
+当前状态以 [`PORTING.md`](../PORTING.md) 为准：本轮只实现，没有新增或运行测试。
+下文测试数量、覆盖率与验证记录来自旧实现，不能作为当前版本等价或可运行的证明。
+已有文件对位不表示行为完整；`watch_session`、会话线格式保真及逐文件对照仍有待完成。
+本轮已整合独立 `pi-chord`/`pi-telemetry`，并修正 Agent、loop、proxy 和会话等待/分页语义。
+
+Stateful agent with tool execution and event streaming：拥有会话转录、生命周期事件流、工具执行（串行/并行）、steering / follow-up 队列，以及可插拔的 LLM provider 层。`harness/**` 已有持久化 lane 运行时、JSONL 会话存储、压缩/分支摘要、事件总线与钩子注册表实现，正在按当前 TS 源码补齐。
 
 ## 仓库结构
 
@@ -197,6 +202,21 @@ asyncio.run(main())
 
 ## API 对照（TS → Python）
 
+### Context 迁移
+
+agent 的 `_chord.context` 现在直接重导出独立 `pi_chord.context`；Context、ContextKey、
+BACKGROUND/TODO 根实例和取消 helper 使用同一身份，key 不再按名称相等。
+`await_with_context(awaitable, context)` 按 TS 的参数顺序等待并竞争取消；取消只停止当前等待者，
+不取消其观察的底层操作。该 helper 不再接收同步值或 `None` context，清理场景可使用
+`BACKGROUND_CONTEXT` 或 `without_abort_signal(context)`。
+
+原简化 Context 的 `signal`、`cancelled`、`cancel_message`、`check_cancelled` 改为通过
+`context.abort_signal` 读取信号，并使用信号的 `aborted`、`reason`、`throw_if_aborted()`。
+`context.value(key)` 未设置时返回 Chord 的 `UNDEFINED`，显式设置 `None` 仍表示 null；
+telemetry helper 对两者均按 TS 的 `??` 返回共享 no-op parent。
+AI 与 Chord 信号通过 abort 事件协议互操作；内部等待使用监听器并在结束或取消时移除，
+不依赖 AI 专有的 `signal.wait()`，也不复制或替换调用方的信号对象。本轮只实现，尚未统一验证。
+
 ### 核心层
 
 | TypeScript (`pi-agent-core`) | Python (`pi_agent_core`) |
@@ -263,7 +283,7 @@ cd py/pi-agent-core
 uv run pytest -q
 ```
 
-当前 **388 passed**（16 个测试文件；CLI 相关测试在 [`pi-simple-cli`](../pi-simple-cli)）。覆盖：
+旧版本曾记录 **388 passed**（本轮未复验；CLI 相关测试在 [`pi-simple-cli`](../pi-simple-cli)）。原有用例范围：
 
 - `test_agent.py` / `test_agent_loop.py`：agent loop 事件序列、transformContext → convertToLlm 管道、工具校验/prepareArguments/before/afterToolCall、并行工具完成顺序与源序持久化、length 截断工具调用的失败处理、steering/follow-up 队列、错误与中止、工具增删声明
 - `test_harness_runtime.py`：事件总线投递顺序与失败隔离、lane 恢复、`AgentHarness.create` 装配、lane 创建的幂等与持久化
@@ -277,7 +297,7 @@ uv run pytest -q
 
 测试只用 faux provider，不触网、不需要真实 API key。
 
-## 状态与范围
+## 旧版本范围记录（不代表本轮验证结果）
 
 移植进度（对照 `packages/agent/src`）：
 

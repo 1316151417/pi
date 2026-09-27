@@ -484,7 +484,7 @@ async def prepare_draft(
             if isinstance(out, dict) and out.get("tools"):
                 tools = list(out["tools"])
         except Exception as error:  # noqa: BLE001 - reported, not re-raised
-            if ctx.signal is not None and ctx.signal.aborted:
+            if ctx.abort_signal is not None and ctx.abort_signal.aborted:
                 raise
             draft.restore(before)
             on_report(str(error))

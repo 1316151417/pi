@@ -183,8 +183,8 @@ async def execute_tool_call(
     async def _invoke() -> ExecutedToolCall:
         nonlocal accepting_updates
         admitted_context = with_abort_signal(gate.signal, context)
-        if admitted_context.signal is not None:
-            admitted_context.signal.throw_if_aborted()
+        if admitted_context.abort_signal is not None:
+            admitted_context.abort_signal.throw_if_aborted()
 
         def _on_update(partial: Any, options: Any = None) -> None:
             if accepting_updates and on_update is not None:

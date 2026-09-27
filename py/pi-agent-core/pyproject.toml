@@ -10,6 +10,8 @@ keywords = ["ai", "agent", "llm", "streaming"]
 dependencies = [
     "httpx==0.28.1",
     "pi-ai==0.85.1",
+    "pi-chord==0.85.1",
+    "pi-telemetry==0.85.1",
 ]
 
 [build-system]
@@ -21,6 +23,8 @@ packages = ["src/pi_agent_core"]
 
 [tool.uv.sources]
 pi-ai = { workspace = true }
+pi-chord = { workspace = true }
+pi-telemetry = { workspace = true }
 
 [dependency-groups]
 dev = [

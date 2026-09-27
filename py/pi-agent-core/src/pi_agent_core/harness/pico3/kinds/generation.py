@@ -570,7 +570,7 @@ async def _stream(
     except StopAsyncIteration:
         pass
     except Exception as error:  # noqa: BLE001 - classified as a provider error
-        if ctx.signal is not None and ctx.signal.aborted:
+        if ctx.abort_signal is not None and ctx.abort_signal.aborted:
             raise
         terminal = AssistantMessage(
             content=[],

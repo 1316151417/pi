@@ -355,7 +355,7 @@ class Lane:
         """Run one effect-free command on this lane's serialized mutation line."""
         self.assert_open()
         while self.idle_owner is not None:
-            await _race(self.idle_owner, self.state_change)
+            await await_with_context(_race(self.idle_owner, self.state_change), context)
             self.assert_open()
 
         outcome: LaneCommandOutcome
@@ -404,13 +404,13 @@ class Lane:
                 raise self.closed_error
             raise
         if outcome.kind == "idle_blocked":
-            await _race(outcome.owner, outcome.change)
+            await await_with_context(_race(outcome.owner, outcome.change), context)
             self.assert_open()
             return await self.command(plan, context)
         if outcome.kind == "reject":
             raise outcome.error
         if outcome.delivery is not None:
-            await await_with_context(context, outcome.delivery)
+            await outcome.delivery
         return outcome.result
 
     async def settle_operation(
@@ -867,12 +867,12 @@ class Lane:
             if claim.kind == "mismatch":
                 return err(claim.error)
             if claim.kind == "occupied":
-                await await_with_context(context, claim.drive.completion)
+                await await_with_context(claim.drive.completion, context)
                 continue
             drive = claim.drive
             if claim.installed:
                 _install_drive(self, drive, context, drive_operation)
-            return ok(await await_with_context(context, drive.completion))
+            return ok(await await_with_context(drive.completion, context))
 
     async def request_operation_abort(self, operation_id: str, context: Context) -> Any:
         """Package-private durable cancellation primitive."""
@@ -1213,7 +1213,7 @@ class Lane:
             self.active_drive.close_gate(error)
         self.signal_state_change()
         if self.idle_owner is not None:
-            await await_with_context(None, _swallow(self.idle_owner))
+            await _swallow(self.idle_owner)
 
     # ------------------------------------------------------------------
     # Queues
@@ -1415,7 +1415,7 @@ class Lane:
             )
             if observation.kind == "idle":
                 return
-            await await_with_context(context, _idle_wait(observation.drive, observation.change))
+            await await_with_context(_idle_wait(observation.drive, observation.change), context)
 
     async def run_when_idle(self, callback: Callable[[Context], Any], context: Context) -> None:
         owner: Optional["asyncio.Future"] = None
@@ -1424,7 +1424,7 @@ class Lane:
             if observation.kind == "claimed":
                 owner = observation.drive
                 break
-            await await_with_context(context, _idle_wait(observation.drive, observation.change))
+            await await_with_context(_idle_wait(observation.drive, observation.change), context)
         if owner is None:
             raise self._on_fault(
                 SessionInvariantError("Idle callback claim was not published"), context
@@ -2038,7 +2038,7 @@ def _drive_claim_plan(lane: Lane, options: Any, context: Context) -> Callable[[L
     operation_id = _opt(options, "operation_id", "operationId")
 
     async def _plan(state: LaneState, reader: Any) -> Any:
-        signal = context.signal
+        signal = context.abort_signal
         if signal is not None and signal.aborted:
             reason = signal.reason
             if isinstance(reason, BaseException):
@@ -2353,12 +2353,29 @@ async def _swallow(future: "asyncio.Future") -> None:
 
 
 async def _race(*futures: Any) -> None:
-    """Resolve when the first of the supplied futures settles, ignoring the rest."""
-    pending = [asyncio.ensure_future(asyncio.shield(item)) if not isinstance(item, asyncio.Future) else item for item in futures if item is not None]
+    """Settle on the first input without cancelling the other shared futures."""
+    pending = [asyncio.shield(item) for item in futures if item is not None]
     if not pending:
         return
+    winner: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+
+    def settled(completed: asyncio.Future[object]) -> None:
+        if completed.cancelled():
+            if not winner.done():
+                winner.cancel()
+            return
+        error = completed.exception()
+        if winner.done():
+            return
+        if error is not None:
+            winner.set_exception(error)
+        else:
+            winner.set_result(completed.result())
+
+    for item in pending:
+        item.add_done_callback(settled)
     try:
-        await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        await winner
     finally:
         for item in pending:
             if not item.done():
@@ -2369,4 +2386,4 @@ async def _idle_wait(drive: Optional[Drive], change: Optional["asyncio.Future"])
     if drive is None:
         await _race(change)
         return
-    await _race(drive.completion, change)
+    await asyncio.shield(drive.completion)

@@ -86,7 +86,7 @@ class HookRunnerImpl:
                 if value is not None and on_value is not None and on_value(value) is True:
                     return
             except Exception as error:  # noqa: BLE001 - reported and skipped
-                if ctx.signal is not None and ctx.signal.aborted:
+                if ctx.abort_signal is not None and ctx.abort_signal.aborted:
                     raise
                 self._on_report(error)
 

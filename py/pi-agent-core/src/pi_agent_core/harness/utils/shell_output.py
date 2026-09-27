@@ -150,7 +150,7 @@ async def execute_shell_with_capture(
     progress = _progress_from(holder["output"])
 
     if not result.ok:
-        aborted = result.error.code == "aborted" or (context.signal is not None and context.signal.aborted)
+        aborted = result.error.code == "aborted" or (context.abort_signal is not None and context.abort_signal.aborted)
         if aborted:
             return ok(
                 ShellCaptureResult(

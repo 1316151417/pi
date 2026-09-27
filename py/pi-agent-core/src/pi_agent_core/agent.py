@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import copy
+import inspect
 import time
-from typing import Any, Callable, List, Optional, Sequence, Set, Union
+from collections.abc import Awaitable, Callable
+from typing import List, Optional, Sequence, Set, Union, cast
 
 from pi_ai.abort import AbortController, AbortSignal
 from pi_ai.transcript import (
@@ -22,7 +23,7 @@ from pi_ai.types import (
     Message,
     Model,
     ModelCost,
-    SimpleStreamOptions,
+    ProviderResponse,
     TextContent,
     ThinkingBudgets,
     Transport,
@@ -40,18 +41,19 @@ from .types import (
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentTool,
-    AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
     MessageEndEvent,
     MessageStartEvent,
+    MessageUpdateEvent,
     PrepareNextTurnContext,
     QueueMode,
     ShouldStopAfterTurnContext,
     StreamFn,
     ThinkingLevel,
     ToolExecutionMode,
-    ToolResultMessage,
+    ToolExecutionStartEvent,
+    ToolExecutionEndEvent,
     TurnEndEvent,
 )
 
@@ -66,23 +68,11 @@ def _default_convert_to_llm(messages: List[AgentMessage]) -> List[Message]:
     ]
 
 
-def _empty_usage() -> Usage:
-    return Usage(cost=Cost())
-
-
-def _default_model() -> Model:
-    return Model(
-        id="unknown",
-        name="unknown",
-        api="unknown",
-        provider="unknown",
-        base_url="",
-        reasoning=False,
-        input=[],
-        cost=ModelCost(),
-        context_window=0,
-        max_tokens=0,
-    )
+_EMPTY_USAGE = Usage(cost=Cost())
+_DEFAULT_MODEL = Model(
+    id="unknown", name="unknown", api="unknown", provider="unknown", base_url="",
+    reasoning=False, input=[], cost=ModelCost(), context_window=0, max_tokens=0,
+)
 
 
 class _MutableAgentState:
@@ -100,7 +90,7 @@ class _MutableAgentState:
         ):
             self._messages.insert(0, initial_message)
 
-        self.model: Model = (initial_state.model if initial_state and initial_state.model else None) or _default_model()
+        self.model: Model = initial_state.model if initial_state is not None and initial_state.model is not None else _DEFAULT_MODEL
         self.thinking_level: ThinkingLevel = (
             initial_state.thinking_level if initial_state and initial_state.thinking_level else "off"
         )
@@ -154,22 +144,22 @@ class AgentOptions:
     def __init__(
         self,
         initial_state: Optional[AgentInitialState] = None,
-        convert_to_llm: Optional[Callable[[List[AgentMessage]], Union[List[Message], Any]]] = None,
+        convert_to_llm: Callable[[list[AgentMessage]], list[Message] | Awaitable[list[Message]]] | None = None,
         transform_context: Optional[
-            Callable[[List[AgentMessage], Optional[AbortSignal]], Any]
+            Callable[[List[AgentMessage], Optional[AbortSignal]], Awaitable[list[AgentMessage]]]
         ] = None,
         stream_fn: Optional[StreamFn] = None,
-        get_api_key: Optional[Callable[[str], Any]] = None,
-        on_payload: Optional[Callable[[Any, Model], Any]] = None,
-        on_response: Optional[Callable[[Any, Model], Any]] = None,
-        before_tool_call: Optional[Callable[[BeforeToolCallContext, Optional[AbortSignal]], Any]] = None,
-        after_tool_call: Optional[Callable[[AfterToolCallContext, Optional[AbortSignal]], Any]] = None,
+        get_api_key: Callable[[str], str | None | Awaitable[str | None]] | None = None,
+        on_payload: Callable[[object, Model], object] | None = None,
+        on_response: Callable[[ProviderResponse, Model], None | Awaitable[None]] | None = None,
+        before_tool_call: Callable[[BeforeToolCallContext, AbortSignal | None], BeforeToolCallResult | None | Awaitable[BeforeToolCallResult | None]] | None = None,
+        after_tool_call: Callable[[AfterToolCallContext, AbortSignal | None], AfterToolCallResult | None | Awaitable[AfterToolCallResult | None]] | None = None,
         should_stop_after_turn: Optional[
-            Callable[[ShouldStopAfterTurnContext, Optional[AbortSignal]], Any]
+            Callable[[ShouldStopAfterTurnContext, Optional[AbortSignal]], bool | Awaitable[bool]]
         ] = None,
-        prepare_next_turn: Optional[Callable[[Optional[AbortSignal]], Any]] = None,
+        prepare_next_turn: Callable[[AbortSignal | None], AgentLoopTurnUpdate | None | Awaitable[AgentLoopTurnUpdate | None]] | None = None,
         prepare_next_turn_with_context: Optional[
-            Callable[[PrepareNextTurnContext, Optional[AbortSignal]], Any]
+            Callable[[PrepareNextTurnContext, Optional[AbortSignal]], AgentLoopTurnUpdate | None | Awaitable[AgentLoopTurnUpdate | None]]
         ] = None,
         steering_mode: QueueMode = "one-at-a-time",
         follow_up_mode: QueueMode = "one-at-a-time",
@@ -228,7 +218,7 @@ class _PendingMessageQueue:
 
 class _ActiveRun:
     def __init__(self) -> None:
-        self.promise: asyncio.Future = asyncio.get_running_loop().create_future()
+        self.promise: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self.abort_controller = AbortController()
 
     def resolve(self) -> None:
@@ -236,9 +226,10 @@ class _ActiveRun:
             self.promise.set_result(None)
 
 
-async def _maybe_await(value: Any) -> Any:
-    if asyncio.iscoroutine(value) or asyncio.isfuture(value):
-        return await value
+async def _maybe_await[T](value: T | Awaitable[T]) -> T:
+    if inspect.isawaitable(value):
+        return await cast(Awaitable[T], value)
+    await asyncio.sleep(0)
     return value
 
 
@@ -252,7 +243,7 @@ class Agent:
     def __init__(self, options: Optional[AgentOptions] = None) -> None:
         runtime_options = options or AgentOptions()
         self._state = _MutableAgentState(runtime_options.initial_state)
-        self.convert_to_llm: Callable[[List[AgentMessage]], Union[List[Message], Any]] = (
+        self.convert_to_llm: Callable[[list[AgentMessage]], list[Message] | Awaitable[list[Message]]] = (
             runtime_options.convert_to_llm or _default_convert_to_llm
         )
         self.transform_context = runtime_options.transform_context
@@ -267,7 +258,8 @@ class Agent:
         self.prepare_next_turn_with_context = runtime_options.prepare_next_turn_with_context
         self._steering_queue = _PendingMessageQueue(runtime_options.steering_mode or "one-at-a-time")
         self._follow_up_queue = _PendingMessageQueue(runtime_options.follow_up_mode or "one-at-a-time")
-        self._listeners: List[Callable[[AgentEvent, AbortSignal], Any]] = []
+        self._listeners: list[Callable[[AgentEvent, AbortSignal], None | Awaitable[None]] | None] = []
+        self._listener_iteration_depth = 0
         self._active_run: Optional[_ActiveRun] = None
         self.session_id: Optional[str] = runtime_options.session_id
         self.thinking_budgets: Optional[ThinkingBudgets] = runtime_options.thinking_budgets
@@ -279,15 +271,18 @@ class Agent:
     # Subscriptions
     # ------------------------------------------------------------------
 
-    def subscribe(self, listener: Callable[[AgentEvent, AbortSignal], Any]) -> Callable[[], None]:
+    def subscribe(self, listener: Callable[[AgentEvent, AbortSignal], None | Awaitable[None]]) -> Callable[[], None]:
         """Subscribe to agent lifecycle events. Returns an unsubscribe callable."""
-        self._listeners.append(listener)
+        if not any(item is listener for item in self._listeners):
+            self._listeners.append(listener)
 
         def _unsubscribe() -> None:
-            try:
-                self._listeners.remove(listener)
-            except ValueError:
-                pass
+            for index, item in enumerate(self._listeners):
+                if item is listener:
+                    self._listeners[index] = None
+                    break
+            if self._listener_iteration_depth == 0:
+                self._listeners = [item for item in self._listeners if item is not None]
 
         return _unsubscribe
 
@@ -358,7 +353,7 @@ class Agent:
     async def wait_for_idle(self) -> None:
         """Resolve when the current run and all awaited event listeners have finished."""
         if self._active_run is not None:
-            await self._active_run.promise
+            await asyncio.shield(self._active_run.promise)
 
     def reset(self) -> None:
         """Clear conversation state and queues while retaining the replayed prompt/tool baseline."""
@@ -406,7 +401,7 @@ class Agent:
         if getattr(last_message, "role", None) == "assistant":
             queued_steering = self._steering_queue.drain()
             if len(queued_steering) > 0:
-                await self._run_prompt_messages(queued_steering, skip_initial_steering_poll=True)
+                await self._run_prompt_messages(queued_steering, {"skip_initial_steering_poll": True})
                 return
 
             queued_follow_ups = self._follow_up_queue.drain()
@@ -427,7 +422,7 @@ class Agent:
         images: Optional[List[ImageContent]],
     ) -> List[AgentMessage]:
         if isinstance(input, list):
-            return list(input)
+            return input
         if isinstance(input, str):
             content: List[Union[TextContent, ImageContent]] = [TextContent(text=input)]
             if images:
@@ -436,7 +431,7 @@ class Agent:
         return [input]
 
     async def _run_prompt_messages(
-        self, messages: List[AgentMessage], options: Optional[dict] = None
+        self, messages: List[AgentMessage], options: dict[str, bool] | None = None
     ) -> None:
         options = options or {}
 
@@ -467,7 +462,7 @@ class Agent:
     def _create_context_snapshot(self) -> AgentContext:
         return AgentContext(messages=list(self._state.messages), tools=list(self._state.tools))
 
-    def _create_loop_config(self, options: Optional[dict] = None) -> AgentLoopConfig:
+    def _create_loop_config(self, options: dict[str, bool] | None = None) -> AgentLoopConfig:
         options = options or {}
         skip_initial_steering_poll = options.get("skip_initial_steering_poll") is True
         should_stop_after_turn = self.should_stop_after_turn
@@ -519,7 +514,7 @@ class Agent:
         loop_config.after_tool_call = self.after_tool_call
         return loop_config
 
-    async def _run_with_lifecycle(self, executor: Callable[[AbortSignal], Any]) -> None:
+    async def _run_with_lifecycle(self, executor: Callable[[AbortSignal], Awaitable[None]]) -> None:
         if self._active_run is not None:
             raise RuntimeError("Agent is already processing.")
 
@@ -543,7 +538,7 @@ class Agent:
             api=self._state.model.api,
             provider=self._state.model.provider,
             model=self._state.model.id,
-            usage=_empty_usage(),
+            usage=_EMPTY_USAGE,
             stop_reason="aborted" if aborted else "error",
             error_message=str(error),
             timestamp=int(time.time() * 1000),
@@ -563,12 +558,6 @@ class Agent:
 
     async def _process_events(self, event: AgentEvent) -> None:
         """Reduce internal state for a loop event, then await listeners."""
-        from .types import (
-            MessageUpdateEvent,
-            ToolExecutionEndEvent,
-            ToolExecutionStartEvent,
-        )
-
         if isinstance(event, MessageStartEvent):
             self._state.streaming_message = event.message
         elif isinstance(event, MessageUpdateEvent):
@@ -587,7 +576,7 @@ class Agent:
         elif isinstance(event, TurnEndEvent):
             if (
                 isinstance(event.message, AssistantMessage)
-                and event.message.error_message is not None
+                and event.message.error_message
             ):
                 self._state.error_message = event.message.error_message
         elif isinstance(event, AgentEndEvent):
@@ -596,5 +585,15 @@ class Agent:
         signal = self._active_run.abort_controller.signal if self._active_run else None
         if signal is None:
             raise RuntimeError("Agent listener invoked outside active run")
-        for listener in list(self._listeners):
-            await _maybe_await(listener(event, signal))
+        self._listener_iteration_depth += 1
+        try:
+            index = 0
+            while index < len(self._listeners):
+                listener = self._listeners[index]
+                index += 1
+                if listener is not None:
+                    await _maybe_await(listener(event, signal))
+        finally:
+            self._listener_iteration_depth -= 1
+            if self._listener_iteration_depth == 0:
+                self._listeners = [item for item in self._listeners if item is not None]

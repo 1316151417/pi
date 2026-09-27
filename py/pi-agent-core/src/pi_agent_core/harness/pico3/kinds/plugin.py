@@ -61,7 +61,7 @@ async def _run(task: Task, runtime: Any, ctx: Context) -> Step:
             done=lambda _tx=None, _task=None: Completion(status="completed", result=result)
         )
     except Exception as error:  # noqa: BLE001 - reported as a task failure
-        if ctx.signal is not None and ctx.signal.aborted:
+        if ctx.abort_signal is not None and ctx.abort_signal.aborted:
             raise
         return Step(
             done=lambda _tx=None, _task=None, error=error: Completion(

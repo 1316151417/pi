@@ -158,12 +158,17 @@ def delete_list(address: ValueList) -> ListDeleteWrite:
 def resolve_list_read_options(options: Optional[ListReadOptions] = None) -> ListReadOptions:
     options = options or ListReadOptions()
     requested_limit = options.limit if options.limit is not None else 1000
-    if not isinstance(requested_limit, int) or requested_limit <= 0:
+    if (
+        isinstance(requested_limit, bool)
+        or not isinstance(requested_limit, (int, float))
+        or not 0 < requested_limit <= 2**53 - 1
+        or requested_limit != int(requested_limit)
+    ):
         raise TypeError("List read limit must be a positive safe integer")
     return ListReadOptions(
         cursor=options.cursor,
-        order=options.order or "asc",
-        limit=min(requested_limit, 10000),
+        order=options.order if options.order is not None else "asc",
+        limit=min(int(requested_limit), 10000),
     )
 
 

@@ -347,7 +347,7 @@ async def _before_tool(
             if value.get("call") is not None:
                 current = value["call"]
         except Exception as error:  # noqa: BLE001 - a throw blocks
-            if ctx.signal is not None and ctx.signal.aborted:
+            if ctx.abort_signal is not None and ctx.abort_signal.aborted:
                 raise
             return {"block": f"hook threw: {error}"}
     return {"call": current}
@@ -470,7 +470,7 @@ async def _invoke(
     try:
         result = await _resolve(declaration.execute(call.get("arguments") or {}, tool_api, ctx))
     except Exception as error:  # noqa: BLE001 - a throw becomes a synthetic error result
-        if ctx.signal is not None and ctx.signal.aborted:
+        if ctx.abort_signal is not None and ctx.abort_signal.aborted:
             raise
         result = synthetic(f"tool threw: {error}", "threw")
     if streamed:

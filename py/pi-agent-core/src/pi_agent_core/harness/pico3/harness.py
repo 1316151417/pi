@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Union
 
+from ..._chord._abort import wait_for_abort
 from ..._chord.context import Context, with_abort_signal
 from pi_ai.abort import AbortSignal
 from pi_ai.types import JsonObject, JsonValue
@@ -1009,26 +1010,25 @@ async def _resolve(value: Any) -> Any:
 
 async def _sleep_with_abort(milliseconds: int, ctx: Context) -> None:
     """Sleep, rejecting if the context aborts first."""
+    signal = ctx.abort_signal
+    if signal is None:
+        await asyncio.sleep(milliseconds / 1000)
+        return
+    signal.throw_if_aborted()
     sleep_task = asyncio.ensure_future(asyncio.sleep(milliseconds / 1000))
-    if ctx.signal is None:
-        await sleep_task
-        return
-    if ctx.signal.aborted:
-        sleep_task.cancel()
-        ctx.signal.throw_if_aborted()
-        return
-    watch = asyncio.ensure_future(ctx.signal.wait())
+    watch = asyncio.ensure_future(wait_for_abort(signal))
     try:
         done, _pending = await asyncio.wait(
             {sleep_task, watch}, return_when=asyncio.FIRST_COMPLETED
         )
         if watch in done:
-            raise ctx.signal.reason
+            signal.throw_if_aborted()
     finally:
         if not watch.done():
             watch.cancel()
         if not sleep_task.done():
             sleep_task.cancel()
+        await asyncio.gather(watch, sleep_task, return_exceptions=True)
 
 
 _ = (AbortSignal, Iterable, ToolDeclaration, UserInput, with_abort_signal, re, WATCH_CAPACITY, apply_envelope, collapse, collapse_kind, generation_kind, job, job_kind, plugin, plugin_kind, post_tools, post_tools_kind, tool, tool_kind)

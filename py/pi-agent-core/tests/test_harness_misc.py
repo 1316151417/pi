@@ -108,7 +108,7 @@ def test_process_proxy_event_toolcall_streams_partial_json():
         partial,
     )
     assert event.tool_call.arguments == {"command": "ls -la"}
-    assert not hasattr(partial.content[0], "partial_json")
+    assert "partialJson" not in partial.content[0].to_json()
 
 
 def test_process_proxy_event_done_and_error():

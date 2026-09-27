@@ -15,7 +15,16 @@ from typing import Any, Dict, List, Optional, Sequence
 import httpx
 
 from ..event_stream import AssistantMessageEventStream, create_assistant_message_event_stream
-from ..models import Provider, create_provider
+from ..api.anthropic_messages_lazy import anthropic_messages_api
+from ..auth.helpers import LazyOAuthOptions, lazy_oauth
+from ..auth.oauth.load import load_anthropic_oauth
+from ..auth.types import (
+    ApiKeyAuth, ApiKeyAuthInput, ApiKeyCredential, AuthResult, ModelAuth,
+    ProviderAuth, ProviderAuthInteraction, SecretAuthPrompt,
+)
+from ..env_api_keys import ANTHROPIC_API_KEY_ENV, ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV
+from ..models import CreateProviderOptions, Provider, create_provider
+from .anthropic_models import ANTHROPIC_MODELS as GENERATED_ANTHROPIC_MODELS
 from ..text import content_text
 from ..transcript import get_current_tools, get_current_system_prompt, collapse_system_messages
 from ..utils.provider_retry import (
@@ -584,27 +593,41 @@ def stream_anthropic(
     return outer
 
 
+def _anthropic_api_key_auth() -> ApiKeyAuth:
+    async def login(interaction: ProviderAuthInteraction) -> ApiKeyCredential:
+        interaction.signal.throw_if_aborted()
+        key = await interaction.prompt(SecretAuthPrompt(message="Enter Anthropic API key"))
+        interaction.signal.throw_if_aborted()
+        return ApiKeyCredential(key=key)
+
+    async def resolve(input: ApiKeyAuthInput) -> AuthResult | None:
+        input.signal.throw_if_aborted()
+        credential = input.credential
+        if credential is not None and credential.key:
+            return AuthResult(auth=ModelAuth(api_key=credential.key), env=credential.env, source="stored credential")
+        auth_token = await input.ctx.env(ANTHROPIC_AUTH_TOKEN_ENV)
+        input.signal.throw_if_aborted()
+        if auth_token:
+            return AuthResult(auth=ModelAuth(headers={"Authorization": f"Bearer {auth_token}"}), source=ANTHROPIC_AUTH_TOKEN_ENV)
+        for env_var in (ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV):
+            api_key = await input.ctx.env(env_var)
+            input.signal.throw_if_aborted()
+            if api_key:
+                return AuthResult(auth=ModelAuth(api_key=api_key), source=env_var)
+        return None
+
+    return ApiKeyAuth(name="Anthropic API key", login=login, resolve=resolve)
+
+
 def anthropic_provider(base_url: Optional[str] = None) -> Provider:
-    models = [
-        Model(
-            id=m.id,
-            name=m.name,
-            api=m.api,
-            provider=m.provider,
-            base_url=base_url or m.base_url,
-            reasoning=m.reasoning,
-            input=m.input,
-            cost=m.cost,
-            context_window=m.context_window,
-            max_tokens=m.max_tokens,
-        )
-        for m in ANTHROPIC_MODELS
-    ]
-    return create_provider(
-        id="anthropic",
-        name="Anthropic",
-        models=models,
-        stream=stream_anthropic,
-        base_url=base_url or ANTHROPIC_DEFAULT_BASE_URL,
-        api_key_env_var="ANTHROPIC_API_KEY",
-    )
+    """Full provider factory; the earlier direct transport helpers remain above."""
+    return create_provider(CreateProviderOptions(
+        id="anthropic", name="Anthropic", base_url=base_url or ANTHROPIC_DEFAULT_BASE_URL,
+        auth=ProviderAuth(
+            api_key=_anthropic_api_key_auth(),
+            oauth=lazy_oauth(LazyOAuthOptions(
+                name="Anthropic (Claude Pro/Max)", is_subscription=True, load=load_anthropic_oauth,
+            )),
+        ),
+        models=list(GENERATED_ANTHROPIC_MODELS.values()), api=anthropic_messages_api(),
+    ))

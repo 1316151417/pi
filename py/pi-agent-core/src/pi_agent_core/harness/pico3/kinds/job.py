@@ -126,7 +126,7 @@ async def _spawn(task: Task, occurrence: int, runtime: Any, ctx: Context) -> Ste
     try:
         await runtime.process_host.start(key, input_record, ctx)
     except Exception as error:  # noqa: BLE001 - reported as a task failure
-        if ctx.signal is not None and ctx.signal.aborted:
+        if ctx.abort_signal is not None and ctx.abort_signal.aborted:
             raise
 
         async def done(tx: Any, current: Optional[Task] = None, _ctx: Any = None) -> Completion:

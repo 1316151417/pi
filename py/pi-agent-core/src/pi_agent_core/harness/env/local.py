@@ -19,6 +19,7 @@ import unicodedata
 from pathlib import Path, PurePath
 from typing import Any, List, Optional
 
+from ..._chord._abort import wait_for_abort
 from ..._chord.context import Context
 from pi_ai.types import JsonObject
 from ..result import Result, err, ok
@@ -390,7 +391,7 @@ class LocalExecutionEnv:
         options: Optional[ShellExecOptions],
         context: Context,
     ) -> Result:
-        abort_signal = context.signal
+        abort_signal = context.abort_signal
         capture = OutputCapture(
             options.capture if options else None,
             context,
@@ -398,6 +399,7 @@ class LocalExecutionEnv:
         )
         cwd = (options.cwd if options and options.cwd else self._cwd)
         process: Optional[asyncio.subprocess.Process] = None
+        abort_task: asyncio.Task[None] | None = None
         timed_out = False
         spill_path: Optional[str] = None
         spill_file = None
@@ -447,7 +449,7 @@ class LocalExecutionEnv:
             async def _abort_watch() -> None:
                 if abort_signal is None:
                     return
-                await abort_signal.wait()
+                await wait_for_abort(abort_signal)
                 try:
                     os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                 except (ProcessLookupError, PermissionError, OSError):
@@ -499,9 +501,6 @@ class LocalExecutionEnv:
 
             await output_task
             await stdin_task
-            if abort_task is not None:
-                abort_task.cancel()
-
             if abort_signal is not None and abort_signal.aborted:
                 return err(ExecutionError(code="aborted", message="aborted"))
             if timed_out:
@@ -525,6 +524,9 @@ class LocalExecutionEnv:
         except Exception as error:  # noqa: BLE001 - encode in Result like TS
             return err(ExecutionError(code="unknown", message=str(error), cause=error))
         finally:
+            if abort_task is not None:
+                abort_task.cancel()
+                await asyncio.gather(abort_task, return_exceptions=True)
             capture.dispose()
             if spill_file is not None:
                 try:

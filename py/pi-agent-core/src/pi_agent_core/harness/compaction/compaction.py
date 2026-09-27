@@ -226,8 +226,8 @@ def create_summary_request_options(options: SimpleStreamOptions, context: Contex
     cloned = copy.copy(options)
     cloned.cache_retention = "none"
     cloned.session_id = cloned.session_id or uuidv7()
-    if context.signal is not None:
-        cloned.signal = context.signal
+    if context.abort_signal is not None:
+        cloned.signal = context.abort_signal
     return cloned
 
 

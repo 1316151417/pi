@@ -1,2 +1,9 @@
 [tool.uv.workspace]
-members = ["pi-agent-core", "pi-ai", "pi-simple-cli"]
+members = ["pi-chord", "pi-telemetry", "pi-tui", "pi-ai", "pi-durable", "pi-agent-core", "pi-session-backend-sqlite", "pi-protocol", "pi-client", "pi-server", "pi-coding-agent", "pi-simple-cli"]
+
+# PyPI pyicu-2.16.2/PKG-INFO declares no Requires-Dist or Requires-Python.
+# Supplying its metadata lets uv lock resolve the sdist without running its build.
+[[tool.uv.dependency-metadata]]
+name = "pyicu"
+version = "2.16.2"
+requires-dist = []

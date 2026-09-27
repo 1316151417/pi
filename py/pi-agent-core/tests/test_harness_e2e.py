@@ -16,8 +16,8 @@ from pi_agent_core._chord.context import BACKGROUND_CONTEXT
 from pi_ai.models import Provider, create_models
 from pi_ai.providers.faux import (
     RegisterFauxProviderOptions,
-    create_faux_core,
     faux_assistant_message,
+    faux_provider,
 )
 from pi_agent_core.harness.agent_harness import AgentHarnessOptions, create_agent_harness
 from pi_agent_core.harness.session import MemorySessionRepo, SessionCreateOptions
@@ -25,19 +25,10 @@ from pi_agent_core.harness.session import MemorySessionRepo, SessionCreateOption
 
 def _faux_models() -> tuple:
     """A ``Models`` registry holding one faux provider and its handle."""
-    handle, functions = create_faux_core(RegisterFauxProviderOptions(provider="faux", api="faux"))
+    handle = faux_provider(RegisterFauxProviderOptions(provider="faux", api="faux"))
     models = create_models()
-    models.set_provider(
-        Provider(
-            id="faux",
-            name="Faux",
-            models=handle.models,
-            stream=functions["stream"],
-            stream_simple=functions["stream_simple"],
-            fetch_deferred=functions.get("fetch_deferred"),
-            cancel_deferred=functions.get("cancel_deferred"),
-        )
-    )
+    assert handle.provider is not None
+    models.set_provider(handle.provider)
     return models, handle
 
 
@@ -362,11 +353,6 @@ async def test_suspended_run_is_reported_as_an_open_operation_on_reopen(workdir)
     """A deferred run suspends durably, and reopen reports it as a resumable operation."""
     import os
 
-    from pi_ai.providers.faux import (
-        RegisterFauxProviderOptions,
-        create_faux_core,
-    )
-    from pi_ai.models import Provider, create_models
     from pi_agent_core.harness.env.local import create_local_execution_env
     from pi_agent_core.harness.session.jsonl import (
         JsonlSessionCreateOptions,
@@ -376,23 +362,14 @@ async def test_suspended_run_is_reported_as_an_open_operation_on_reopen(workdir)
 
     # One pending fetch keeps the handle pollable, so the resumed poll streams a
     # real deferred message instead of settling immediately without a start event.
-    handle, functions = create_faux_core(
+    handle = faux_provider(
         RegisterFauxProviderOptions(
             provider="faux", api="faux", deferred={"pendingFetches": 1}
         )
     )
     models = create_models()
-    models.set_provider(
-        Provider(
-            id="faux",
-            name="Faux",
-            models=handle.models,
-            stream=functions["stream"],
-            stream_simple=functions["stream_simple"],
-            fetch_deferred=functions.get("fetch_deferred"),
-            cancel_deferred=functions.get("cancel_deferred"),
-        )
-    )
+    assert handle.provider is not None
+    models.set_provider(handle.provider)
     env = create_local_execution_env(cwd=workdir)
     repo = JsonlSessionRepo(
         JsonlSessionRepoOptions(
@@ -529,6 +506,7 @@ async def test_assistant_frames_are_committed_while_the_response_streams():
             models=[model],
             stream=_gated_stream,
             stream_simple=_gated_stream,
+            auth=faux_provider().provider.auth,
         )
     )
     repo = MemorySessionRepo()

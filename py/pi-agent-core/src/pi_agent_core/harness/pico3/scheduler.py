@@ -9,8 +9,8 @@ checkpoint names.
 
 Port notes:
 
-* ``AbortSignal`` has no event listeners in this port, so waiting on an abort is
-  await ``signal.wait()`` in a task that is cancelled when the wait finishes.
+* Abort waiting uses the shared event API of the AI and Chord signals. Waiter
+  settlement removes the listener and its scheduler registration.
 * The session is duck-typed through :class:`SessionLike`: the scheduler needs
   ``commit``, ``live_tasks``, ``listeners``, ``on_line``, ``storage`` and
   ``retire``, and nothing else.
@@ -430,7 +430,7 @@ class Scheduler:
                 handler_lease["token"].revoke()
             if step.done is not None:
                 return step.done
-            if ctx.signal is not None and ctx.signal.aborted:
+            if ctx.abort_signal is not None and ctx.abort_signal.aborted:
                 return None
             transition_lease = self._lease(task, kind, "run", ctx)
             try:
@@ -529,8 +529,8 @@ class Scheduler:
         terminal: Callable[[Context], Awaitable[Any]],
     ) -> Any:
         """Read state and install the waiter in one line operation; the wait itself is off-line."""
-        if ctx.signal is not None:
-            ctx.signal.throw_if_aborted()
+        if ctx.abort_signal is not None:
+            ctx.abort_signal.throw_if_aborted()
 
         async def register(line_ctx: Context) -> Dict[str, Any]:
             now = await terminal(line_ctx)
@@ -552,13 +552,23 @@ class Scheduler:
                 future.set_result(value)
 
         waiters.add(waiter)
-        cancel_abort = _on_abort(ctx, lambda: _reject(future, ctx))
-        future.add_done_callback(lambda _f: cancel_abort())
+
+        def on_abort() -> None:
+            waiters.discard(waiter)
+            _reject(future, ctx)
+
+        cancel_abort = _on_abort(ctx, on_abort)
+
+        def cleanup(_future: object) -> None:
+            waiters.discard(waiter)
+            cancel_abort()
+
+        future.add_done_callback(cleanup)
         return future
 
     async def wait_for_idle(self, conversation_id: Optional[Id], ctx: Context) -> None:
-        if ctx.signal is not None:
-            ctx.signal.throw_if_aborted()
+        if ctx.abort_signal is not None:
+            ctx.abort_signal.throw_if_aborted()
 
         def register(_line_ctx: Context) -> Dict[str, Any]:
             if self.is_idle(conversation_id):
@@ -580,8 +590,18 @@ class Scheduler:
 
         waiter = _IdleWaiter(conversation_id=conversation_id, resolve=resolve)
         self.idle_waiters.add(waiter)
-        cancel_abort = _on_abort(ctx, lambda: _reject(future, ctx))
-        future.add_done_callback(lambda _f: cancel_abort())
+
+        def on_abort() -> None:
+            self.idle_waiters.discard(waiter)
+            _reject(future, ctx)
+
+        cancel_abort = _on_abort(ctx, on_abort)
+
+        def cleanup(_future: object) -> None:
+            self.idle_waiters.discard(waiter)
+            cancel_abort()
+
+        future.add_done_callback(cleanup)
         return future
 
     def is_idle(self, conversation_id: Optional[Id]) -> bool:
@@ -641,28 +661,33 @@ def _copy_task(task: Task, **changes: Any) -> Task:
 def _reject(future: Any, ctx: Context) -> None:
     if future.done():
         return
-    reason = ctx.signal.reason if ctx.signal is not None else None
+    reason = ctx.abort_signal.reason if ctx.abort_signal is not None else None
     future.set_exception(reason if isinstance(reason, BaseException) else RuntimeError("aborted"))
 
 
 def _on_abort(ctx: Context, callback: Callable[[], None]) -> Callable[[], None]:
     """Run ``callback`` when the context aborts; the returned call cancels the watch."""
-    if ctx.signal is None:
+    signal = ctx.abort_signal
+    if signal is None:
         return lambda: None
-    if ctx.signal.aborted:
-        callback()
-        return lambda: None
-    watch = asyncio.ensure_future(ctx.signal.wait())
+    active = True
 
-    def fired(future: asyncio.Future) -> None:
-        if future.cancelled():
+    def fired() -> None:
+        nonlocal active
+        if not active:
             return
+        active = False
+        signal.remove_event_listener("abort", fired)
         callback()
 
-    watch.add_done_callback(fired)
+    signal.add_event_listener("abort", fired, once=True)
+    if signal.aborted:
+        fired()
 
     def cancel() -> None:
-        watch.cancel()
+        nonlocal active
+        active = False
+        signal.remove_event_listener("abort", fired)
 
     return cancel
 

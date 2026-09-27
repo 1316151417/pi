@@ -21,7 +21,7 @@ import os
 import sys
 import tempfile
 import time
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 
 from pi_agent_core import (
     Agent,
@@ -31,15 +31,15 @@ from pi_agent_core import (
     AgentToolResult,
     set_default_stream_fn,
 )
-from pi_ai.models import Models, create_models
+from pi_ai.models import Models, Provider, create_models
 from pi_ai.providers.anthropic import anthropic_provider
 from pi_ai.providers.faux import (
     FauxModelDefinition,
     RegisterFauxProviderOptions,
-    create_faux_core,
     faux_assistant_message,
     faux_tool_call,
     faux_text,
+    faux_provider,
 )
 from pi_ai.providers.openai_completions import openai_provider
 from pi_ai.types import (
@@ -86,20 +86,13 @@ FAUX_HARNESS_SCRIPT = [
 
 
 def register_faux(models: Models) -> None:
-    handle, streams = create_faux_core(
+    handle = faux_provider(
         RegisterFauxProviderOptions(api="faux", provider="faux", tokens_per_second=80)
     )
     handle.set_responses(list(FAUX_CHAT_SCRIPT))
 
-    from pi_ai.models import Provider
-
-    faux_provider_instance = Provider(
-        id="faux",
-        name="Faux",
-        models=handle.models,
-        stream=streams["stream"],
-        stream_simple=streams["stream_simple"],
-    )
+    faux_provider_instance = cast(Provider, handle.provider)
+    faux_provider_instance.name = "Faux"
     models.set_provider(faux_provider_instance)
 
 
@@ -494,22 +487,14 @@ async def run_self_test() -> int:
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
-        handle, streams = create_faux_core(
+        handle = faux_provider(
             RegisterFauxProviderOptions(api="faux-harness", provider="faux-harness")
         )
         handle.set_responses(list(FAUX_HARNESS_SCRIPT))
 
-        from pi_ai.models import Provider
-
-        models.set_provider(
-            Provider(
-                id="faux-harness",
-                name="Faux Harness",
-                models=handle.models,
-                stream=streams["stream"],
-                stream_simple=streams["stream_simple"],
-            )
-        )
+        provider = cast(Provider, handle.provider)
+        provider.name = "Faux Harness"
+        models.set_provider(provider)
         harness_model = handle.get_model()
         env = create_local_execution_env(cwd=tmp)
         harness_agent = Agent(
@@ -543,7 +528,6 @@ async def run_self_test() -> int:
 
 async def _self_test_agent_harness_runtime() -> None:
     """Prove the durable AgentHarness runtime end to end on a JSONL session."""
-    from pi_ai.models import Provider
     from pi_ai.providers.faux import faux_assistant_message, faux_tool_call
     from pi_agent_core.harness.agent_harness import AgentHarnessOptions, create_agent_harness
     from pi_agent_core.harness.session.jsonl import (
@@ -555,19 +539,13 @@ async def _self_test_agent_harness_runtime() -> None:
     from pi_agent_core.harness.tool_adapter import StaticToolContext, default_agent_harness_tools
 
     with tempfile.TemporaryDirectory() as tmp:
-        handle, functions = create_faux_core(
+        handle = faux_provider(
             RegisterFauxProviderOptions(api="faux-runtime", provider="faux-runtime")
         )
         models = create_models()
-        models.set_provider(
-            Provider(
-                id="faux-runtime",
-                name="Faux Runtime",
-                models=handle.models,
-                stream=functions["stream"],
-                stream_simple=functions["stream_simple"],
-            )
-        )
+        provider = cast(Provider, handle.provider)
+        provider.name = "Faux Runtime"
+        models.set_provider(provider)
         env = create_local_execution_env(cwd=tmp)
         repo = JsonlSessionRepo(
             JsonlSessionRepoOptions(file_system=env, sessions_root=os.path.join(tmp, "sessions"))
@@ -677,7 +655,7 @@ async def async_main(argv: Optional[List[str]] = None) -> int:
     models = build_models(args.provider, base_url=args.base_url, api_key=args.api_key, model_id=args.model)
     model = resolve_model(models, args.provider, args.model)
 
-    if args.provider != "faux" and not models.is_configured(args.provider):
+    if args.provider != "faux" and not await models.is_configured(args.provider):
         env_var = "ANTHROPIC_API_KEY" if args.provider == "anthropic" else "OPENAI_API_KEY"
         raise SystemExit(f"Provider {args.provider!r} requires {env_var} to be set")
 

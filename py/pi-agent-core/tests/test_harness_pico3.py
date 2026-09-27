@@ -1389,7 +1389,10 @@ async def test_scheduler_abort_marks_then_joins_the_running_invocation():
 
     async def long_phase(task, runtime, ctx):
         started.set()
-        await ctx.signal.wait()
+        aborted = asyncio.Event()
+        assert ctx.abort_signal is not None
+        ctx.abort_signal.add_event_listener("abort", aborted.set, once=True)
+        await aborted.wait()
         raise RuntimeError("aborted handler")
 
     kind = t.Kind(name="pi.demo", phases={}, initial=long_phase)

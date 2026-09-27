@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from ..._chord._abort import wait_for_abort
 from ..._chord.context import Context
 from .types import ToolDeclaration, ToolResult
 
@@ -68,12 +69,12 @@ class BashTool:
                     return
                 api.stream(chunk)
 
-        signal = ctx.signal
+        abort_signal = ctx.abort_signal
 
         async def kill_on_abort() -> None:
-            if signal is None:
+            if abort_signal is None:
                 return
-            await signal.wait()
+            await wait_for_abort(abort_signal)
             if process.returncode is None:
                 process.kill()
 
@@ -83,6 +84,7 @@ class BashTool:
             status = await process.wait()
         finally:
             killer.cancel()
+            await asyncio.gather(killer, return_exceptions=True)
         code: Optional[int] = status if status >= 0 else None
         signal_name: Optional[str] = None
         if status < 0:

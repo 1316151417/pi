@@ -1,15 +1,19 @@
 """Telemetry-aware context helpers ported from ``harness/context.ts``.
 
-The chord context primitives already live in :mod:`.._chord.context` and are
-re-exported here; this module adds the telemetry parent that spans started
-through a context derive from.
+The primitives share the independent ``pi_chord`` runtime. This module adds the
+telemetry parent using the independent ``pi_telemetry`` contracts.
 """
 
 from __future__ import annotations
 
+from typing import cast
+
+from pi_telemetry import NOOP_TELEMETRY_CONTEXT, TelemetryContext
+
 from .._chord.context import (
     BACKGROUND_CONTEXT,
     TODO_CONTEXT,
+    UNDEFINED,
     Context,
     ContextKey,
     await_with_context,
@@ -19,7 +23,6 @@ from .._chord.context import (
     with_context_value,
     without_abort_signal,
 )
-from . import telemetry as _telemetry
 
 __all__ = [
     "await_with_context",
@@ -37,15 +40,17 @@ __all__ = [
     "with_telemetry_context",
 ]
 
-TELEMETRY_CONTEXT_KEY = create_context_key("pi.telemetryContext")
+TELEMETRY_CONTEXT_KEY: ContextKey[TelemetryContext] = create_context_key("pi.telemetryContext")
 
 
-def get_telemetry_context(context: Context) -> "_telemetry.TelemetryContext":
+def get_telemetry_context(context: Context) -> TelemetryContext:
     """Return the telemetry parent attached to a context, or the shared no-op parent."""
     attached = context.value(TELEMETRY_CONTEXT_KEY)
-    return attached if attached is not None else _telemetry.NOOP_TELEMETRY_CONTEXT
+    if attached is UNDEFINED or attached is None:
+        return NOOP_TELEMETRY_CONTEXT
+    return cast(TelemetryContext, attached)
 
 
-def with_telemetry_context(telemetry_context: "_telemetry.TelemetryContext", context: Context) -> Context:
+def with_telemetry_context(telemetry_context: TelemetryContext, context: Context) -> Context:
     """Derive a context whose telemetry children use the supplied parent or active span."""
     return with_context_value(TELEMETRY_CONTEXT_KEY, telemetry_context, context)

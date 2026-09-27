@@ -1,18 +1,25 @@
 """Context-overflow detection ported from pi-ai ``src/utils/overflow.ts``.
 
-JS regular expressions are ported to :mod:`re` with the same flags and used
-through :meth:`re.Pattern.search`, which matches ``RegExp.prototype.test``
-semantics (unanchored search, dot does not cross newlines by default).
+The source patterns use ASCII case folding and digits, JavaScript whitespace,
+and JavaScript's four line terminators for dot matching. Pattern searches retain
+the source's unanchored ``RegExp.prototype.test`` behavior.
 """
 
 from __future__ import annotations
 
 import re
-from typing import List, Optional
 
+from ._json_runtime import JS_WHITESPACE
 from .types import AssistantMessage
 
 __all__ = ["is_context_overflow", "is_recoverable_length", "get_overflow_patterns"]
+
+_JS_SPACE = "[" + re.escape(JS_WHITESPACE) + "]"
+
+
+def _pattern(source: str) -> re.Pattern[str]:
+    return re.compile(source.replace(r"\s", _JS_SPACE), re.IGNORECASE | re.ASCII)
+
 
 #: Regex patterns to detect context overflow errors from different providers.
 #:
@@ -46,37 +53,36 @@ __all__ = ["is_context_overflow", "is_recoverable_length", "get_overflow_pattern
 #:   input filling the context window.
 #: - DashScope/Qwen: "Range of input length should be [1, X]" (HTTP 400 invalid_parameter_error)
 #: - Ollama: Some deployments truncate silently, others return errors like "prompt too long; exceeded max context length by X tokens"
-OVERFLOW_PATTERNS: List[re.Pattern] = [
-    re.compile(r"prompt is too long", re.IGNORECASE),  # Anthropic token overflow
-    re.compile(r"request_too_large", re.IGNORECASE),  # Anthropic request byte-size overflow (HTTP 413)
-    re.compile(r"input is too long for requested model", re.IGNORECASE),  # Amazon Bedrock
-    re.compile(r"exceeds the context window", re.IGNORECASE),  # OpenAI (Completions & Responses API)
-    re.compile(
+OVERFLOW_PATTERNS: list[re.Pattern[str]] = [
+    _pattern(r"prompt is too long"),  # Anthropic token overflow
+    _pattern(r"request_too_large"),  # Anthropic request byte-size overflow (HTTP 413)
+    _pattern(r"input is too long for requested model"),  # Amazon Bedrock
+    _pattern(r"exceeds the context window"),  # OpenAI (Completions & Responses API)
+    _pattern(
         r"exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))",
-        re.IGNORECASE,
     ),  # OpenAI-compatible proxies (LiteLLM)
-    re.compile(r"input token count.*exceeds the maximum", re.IGNORECASE),  # Google (Gemini)
-    re.compile(r"maximum prompt length is \d+", re.IGNORECASE),  # xAI (Grok)
-    re.compile(r"reduce the length of the messages", re.IGNORECASE),  # Groq
-    re.compile(r"maximum context length is \d+ tokens", re.IGNORECASE),  # OpenRouter (most backends)
-    re.compile(r"exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?", re.IGNORECASE),  # OpenRouter/Poolside
-    re.compile(r"input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)", re.IGNORECASE),  # Together AI
-    re.compile(r"exceeds the limit of \d+", re.IGNORECASE),  # GitHub Copilot
-    re.compile(r"exceeds the available context size", re.IGNORECASE),  # llama.cpp server
-    re.compile(r"greater than the context length", re.IGNORECASE),  # LM Studio
-    re.compile(r"context window exceeds limit", re.IGNORECASE),  # MiniMax
-    re.compile(r"exceeded model token limit", re.IGNORECASE),  # Kimi For Coding
-    re.compile(r"too large for model with \d+ maximum context length", re.IGNORECASE),  # Mistral
-    re.compile(r"prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?", re.IGNORECASE),  # DS4 server
-    re.compile(r"model_context_window_exceeded", re.IGNORECASE),  # z.ai non-standard finish_reason surfaced as error text
-    re.compile(r"prompt too long; exceeded (?:max )?context length", re.IGNORECASE),  # Ollama explicit overflow error
-    re.compile(r"range of input length should be", re.IGNORECASE),  # DashScope / Qwen Token Plan
-    re.compile(r"context[_ ]length[_ ]exceeded", re.IGNORECASE),  # Generic fallback
-    re.compile(r"too many tokens", re.IGNORECASE),  # Generic fallback
-    re.compile(r"token limit exceeded", re.IGNORECASE),  # Generic fallback
+    _pattern(r"input token count[^\r\n\u2028\u2029]*exceeds the maximum"),  # Google (Gemini)
+    _pattern(r"maximum prompt length is \d+"),  # xAI (Grok)
+    _pattern(r"reduce the length of the messages"),  # Groq
+    _pattern(r"maximum context length is \d+ tokens"),  # OpenRouter (most backends)
+    _pattern(r"exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?"),  # OpenRouter/Poolside
+    _pattern(r"input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)"),  # Together AI
+    _pattern(r"exceeds the limit of \d+"),  # GitHub Copilot
+    _pattern(r"exceeds the available context size"),  # llama.cpp server
+    _pattern(r"greater than the context length"),  # LM Studio
+    _pattern(r"context window exceeds limit"),  # MiniMax
+    _pattern(r"exceeded model token limit"),  # Kimi For Coding
+    _pattern(r"too large for model with \d+ maximum context length"),  # Mistral
+    _pattern(r"prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?"),  # DS4 server
+    _pattern(r"model_context_window_exceeded"),  # z.ai non-standard finish_reason surfaced as error text
+    _pattern(r"prompt too long; exceeded (?:max )?context length"),  # Ollama explicit overflow error
+    _pattern(r"range of input length should be"),  # DashScope / Qwen Token Plan
+    _pattern(r"context[_ ]length[_ ]exceeded"),  # Generic fallback
+    _pattern(r"too many tokens"),  # Generic fallback
+    _pattern(r"token limit exceeded"),  # Generic fallback
 ]
 
-CEREBRAS_BODYLESS_OVERFLOW_PATTERN = re.compile(r"^4(?:00|13)\s*(?:status code)?\s*\(no body\)", re.IGNORECASE)
+CEREBRAS_BODYLESS_OVERFLOW_PATTERN = _pattern(r"^4(?:00|13)\s*(?:status code)?\s*\(no body\)")
 
 #: Patterns that indicate non-overflow errors (e.g. rate limiting, server errors).
 #: Error messages matching any of these are excluded from overflow detection
@@ -85,14 +91,14 @@ CEREBRAS_BODYLESS_OVERFLOW_PATTERN = re.compile(r"^4(?:00|13)\s*(?:status code)?
 #: Example: Bedrock formats throttling errors as "ThrottlingException: Too many tokens,
 #: please wait before trying again." which would match the ``too many tokens`` overflow
 #: pattern without this exclusion.
-NON_OVERFLOW_PATTERNS: List[re.Pattern] = [
-    re.compile(r"^(Throttling error|Service unavailable):", re.IGNORECASE),  # AWS Bedrock (formatBedrockError prefixes)
-    re.compile(r"rate limit", re.IGNORECASE),  # Generic rate limiting
-    re.compile(r"too many requests", re.IGNORECASE),  # Generic HTTP 429 style
+NON_OVERFLOW_PATTERNS: list[re.Pattern[str]] = [
+    _pattern(r"^(Throttling error|Service unavailable):"),  # AWS Bedrock (formatBedrockError prefixes)
+    _pattern(r"rate limit"),  # Generic rate limiting
+    _pattern(r"too many requests"),  # Generic HTTP 429 style
 ]
 
 
-def is_context_overflow(message: AssistantMessage, context_window: Optional[int] = None) -> bool:
+def is_context_overflow(message: AssistantMessage, context_window: int | float | None = None) -> bool:
     """Check if an assistant message represents a context overflow error.
 
     This handles three cases:
@@ -134,7 +140,7 @@ def is_context_overflow(message: AssistantMessage, context_window: Optional[int]
     return False
 
 
-def is_recoverable_length(message: AssistantMessage, desired_max_output: int) -> bool:
+def is_recoverable_length(message: AssistantMessage, desired_max_output: int | float) -> bool:
     """Check whether a length stop ended below the caller or model's intended output limit.
 
     Such responses may be caused by context pressure or provider-side truncation, so
@@ -148,6 +154,6 @@ def is_recoverable_length(message: AssistantMessage, desired_max_output: int) ->
     )
 
 
-def get_overflow_patterns() -> List[re.Pattern]:
+def get_overflow_patterns() -> list[re.Pattern[str]]:
     """Get the overflow patterns for testing purposes."""
     return list(OVERFLOW_PATTERNS)

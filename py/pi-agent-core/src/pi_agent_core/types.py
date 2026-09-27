@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Set as AbstractSet, TypeVar, Union
+from collections.abc import Set as AbstractSet
+from typing import Awaitable, Callable, List, Literal, Optional, Protocol, Union
 
 from pi_ai.abort import AbortSignal
+from pi_ai.event_stream import AssistantMessageEventStream
 from pi_ai.types import (
     AgentMessage,
     AssistantMessage,
@@ -17,6 +19,7 @@ from pi_ai.types import (
     SimpleStreamOptions,
     TextContent,
     Tool,
+    ToolCall,
     ToolResultMessage,
     TranscriptContext,
     Usage,
@@ -56,19 +59,17 @@ __all__ = [
     "ToolExecutionEndEvent",
 ]
 
-T = TypeVar("T")
-
 #: Stream function used by the agent loop. ``Models.stream_simple`` satisfies this shape.
 StreamFn = Callable[
     [Model, TranscriptContext, Optional[SimpleStreamOptions]],
-    Union[Any, Awaitable[Any]],
+    Union[AssistantMessageEventStream, Awaitable[AssistantMessageEventStream]],
 ]
 
-ToolExecutionMode = str  # "sequential" | "parallel"
-QueueMode = str  # "all" | "one-at-a-time"
-ThinkingLevel = str  # "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+ToolExecutionMode = Literal["sequential", "parallel"]
+QueueMode = Literal["all", "one-at-a-time"]
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 
-AgentToolCall = Any  # ToolCall content block from an assistant message
+AgentToolCall = ToolCall
 
 
 @dataclass
@@ -85,7 +86,7 @@ class AfterToolCallResult:
     """Partial override returned from ``after_tool_call``."""
 
     content: Optional[List[Union[TextContent, ImageContent]]] = None
-    details: Any = None
+    details: object = None
     is_error: Optional[bool] = None
     usage: Optional[Usage] = None
     terminate: Optional[bool] = None
@@ -95,7 +96,7 @@ class AfterToolCallResult:
 class BeforeToolCallContext:
     assistant_message: AssistantMessage
     tool_call: AgentToolCall
-    args: Any
+    args: object
     context: "AgentContext"
 
 
@@ -103,7 +104,7 @@ class BeforeToolCallContext:
 class AfterToolCallContext:
     assistant_message: AssistantMessage
     tool_call: AgentToolCall
-    args: Any
+    args: object
     result: "AgentToolResult"
     is_error: bool
     context: "AgentContext"
@@ -168,7 +169,7 @@ class AgentToolResult:
     """Final or partial result produced by a tool."""
 
     content: List[Union[TextContent, ImageContent]] = field(default_factory=list)
-    details: Any = None
+    details: object = None
     usage: Optional[Usage] = None
     terminate: Optional[bool] = None
 
@@ -182,7 +183,7 @@ class AgentStateProtocol(Protocol):
     @property
     def system_prompt(self) -> str: ...
 
-    model: Any
+    model: Model
     thinking_level: ThinkingLevel
 
     @property
@@ -220,14 +221,14 @@ class AgentTool(Tool):
     """Tool definition used by the agent runtime."""
 
     label: str = ""
-    prepare_arguments: Optional[Callable[[Any], Any]] = None
+    prepare_arguments: Optional[Callable[[object], object]] = None
     execute: Optional[
         Callable[
-            [str, Any, Optional[AbortSignal], Optional[AgentToolUpdateCallback]],
+            [str, object, Optional[AbortSignal], Optional[AgentToolUpdateCallback]],
             Awaitable[AgentToolResult],
         ]
     ] = None
-    replay: Optional[str] = None  # "never" | "safe"
+    replay: Optional[Literal["never", "safe"]] = None
     execution_mode: Optional[ToolExecutionMode] = None
 
 
@@ -291,7 +292,7 @@ class ToolExecutionStartEvent:
     type: str = field(default="tool_execution_start", init=False)
     tool_call_id: str = ""
     tool_name: str = ""
-    args: Any = None
+    args: object = None
 
 
 @dataclass
@@ -299,8 +300,8 @@ class ToolExecutionUpdateEvent:
     type: str = field(default="tool_execution_update", init=False)
     tool_call_id: str = ""
     tool_name: str = ""
-    args: Any = None
-    partial_result: Any = None
+    args: object = None
+    partial_result: object = None
 
 
 @dataclass
@@ -308,7 +309,7 @@ class ToolExecutionEndEvent:
     type: str = field(default="tool_execution_end", init=False)
     tool_call_id: str = ""
     tool_name: str = ""
-    result: Any = None
+    result: object = None
     is_error: bool = False
 
 

@@ -42,10 +42,10 @@ def create_write_tool() -> AgentHarnessTool:
         content = params["content"]
 
         async def _mutate() -> AgentToolResult:
-            if context.signal is not None and context.signal.aborted:
+            if context.abort_signal is not None and context.abort_signal.aborted:
                 raise RuntimeError("Operation aborted")
             get_or_throw(await env.write_file(await resolve_tool_path(env, path, context), content, context))
-            if context.signal is not None and context.signal.aborted:
+            if context.abort_signal is not None and context.abort_signal.aborted:
                 raise RuntimeError("Operation aborted")
             return AgentToolResult(content=[TextContent(text=f"Successfully wrote to {path}")])
 

@@ -261,7 +261,7 @@ def _make_request(lane: Any, drive: Any, prepared: PreparedGeneration) -> Any:
         def _admitted() -> Any:
             resolved = dict(options)
             resolved["sessionId"] = f"{lane.session.metadata.id}:{lane.name}"
-            resolved["signal"] = admitted.signal
+            resolved["signal"] = admitted.abort_signal
             return lane.models.stream_simple(prepared.model, ai_context, resolved)
 
         return drive.gate.admit(_admitted)

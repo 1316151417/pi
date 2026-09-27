@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import copy
-import json
-from typing import Any, Iterable, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import List, Optional, Protocol, TypeGuard, cast
 
+from ._javascript import javascript_json_stringify, javascript_object_keys
+from ._json_runtime import parse_json
 from .text import content_text, get_system_message_text
 from .types import (
     Context,
+    JsonObject,
     Message,
     SystemMessage,
     Tool,
@@ -18,6 +20,7 @@ from .types import (
 
 __all__ = [
     "TranscriptMessages",
+    "TranscriptContext",
     "create_initial_system_message",
     "normalize_context",
     "get_initial_system_message",
@@ -38,7 +41,17 @@ __all__ = [
     "TranscriptTools",
 ]
 
-TranscriptMessages = Sequence[Any]
+
+class _TranscriptMessage(Protocol):
+    @property
+    def role(self) -> str: ...
+
+
+TranscriptMessages = Sequence[_TranscriptMessage]
+
+
+def _is_system_message(message: _TranscriptMessage) -> TypeGuard[SystemMessage]:
+    return getattr(message, "role", None) == "system"
 
 
 def create_initial_system_message(
@@ -49,9 +62,9 @@ def create_initial_system_message(
     has_tools = tools is not None and len(tools) > 0
     if not has_system_prompt and not has_tools:
         return None
-    message = SystemMessage(content=system_prompt or "", timestamp=0)
+    message = SystemMessage(content=system_prompt if system_prompt is not None else "", timestamp=0)
     if has_tools:
-        message.tools_added = list(tools)
+        message.tools_added = tools if isinstance(tools, list) else list(cast(Sequence[Tool], tools))
     return message
 
 
@@ -59,14 +72,14 @@ def normalize_context(context: Context) -> TranscriptContext:
     """Fold ``Context.system_prompt`` and ``Context.tools`` into a leading system message."""
     initial_message = create_initial_system_message(context.system_prompt, context.tools)
     messages: List[Message] = (
-        [initial_message, *context.messages] if initial_message else list(context.messages)
+        [initial_message, *context.messages] if initial_message else context.messages
     )
     return TranscriptContext(messages=messages)
 
 
 def get_initial_system_message(messages: TranscriptMessages) -> Optional[SystemMessage]:
     first = messages[0] if len(messages) > 0 else None
-    return first if first is not None and getattr(first, "role", None) == "system" else None
+    return first if first is not None and _is_system_message(first) else None
 
 
 def without_initial_system_message(messages: List[Message]) -> List[Message]:
@@ -77,7 +90,7 @@ def get_current_tools(messages: TranscriptMessages) -> List[Tool]:
     """Resolve the tools available after applying every transcript delta in order."""
     tools: dict[str, Tool] = {}
     for message in messages:
-        if getattr(message, "role", None) != "system":
+        if not _is_system_message(message):
             continue
         for ref in message.tools_removed or []:
             tools.pop(ref.name, None)
@@ -92,14 +105,16 @@ def get_current_system_message(messages: TranscriptMessages) -> Optional[SystemM
     sections: dict[str, str] = {}
     timestamp: Optional[int] = None
     for message in messages:
-        if getattr(message, "role", None) != "system":
+        if not _is_system_message(message):
             continue
         if timestamp is None:
             timestamp = message.timestamp
         text = content_text(message.content)
         if len(text) > 0:
             content.append(text)
-        for name, value in (message.sections or {}).items():
+        message_sections = message.sections if message.sections is not None else {}
+        for name in javascript_object_keys(message_sections):
+            value = message_sections[name]
             if value is None:
                 sections.pop(name, None)
             else:
@@ -110,7 +125,7 @@ def get_current_system_message(messages: TranscriptMessages) -> Optional[SystemM
     result = SystemMessage(
         content="\n\n".join(content),
         sections=dict(sections) if sections else None,
-        tools_added=list(tools) if tools else None,
+        tools_added=tools if tools else None,
         timestamp=timestamp if timestamp is not None else 0,
     )
     return result
@@ -123,7 +138,7 @@ def get_current_system_prompt(messages: TranscriptMessages) -> str:
 
 def collapse_system_messages(context: TranscriptContext) -> TranscriptContext:
     head = get_current_system_message(context.messages)
-    messages = [m for m in context.messages if getattr(m, "role", None) != "system"]
+    messages = [m for m in context.messages if not _is_system_message(m)]
     return TranscriptContext(messages=[head, *messages] if head else messages)
 
 
@@ -137,16 +152,19 @@ def resolve_transcript(
 
 def to_tool_declaration(tool: Tool) -> Tool:
     """Strip executable and display-only fields from a tool before comparison or persistence."""
+    parameters = javascript_json_stringify(tool.parameters)
+    if parameters is None:
+        raise ValueError("Tool parameters are not JSON-serializable")
     return Tool(
         name=tool.name,
         description=tool.description,
-        parameters=json.loads(json.dumps(tool.parameters)),
-        constrained_sampling=None if tool.constrained_sampling is None else copy.deepcopy(tool.constrained_sampling),
+        parameters=cast(JsonObject, parse_json(parameters)),
+        constrained_sampling=tool.constrained_sampling,
     )
 
 
 def declarations_equal(left: Tool, right: Tool) -> bool:
-    return json.dumps(to_tool_declaration(left).to_json()) == json.dumps(to_tool_declaration(right).to_json())
+    return javascript_json_stringify(to_tool_declaration(left)) == javascript_json_stringify(to_tool_declaration(right))
 
 
 class ToolStateChanges:
@@ -175,7 +193,7 @@ def get_tool_state_changes(previous: Sequence[Tool], current: Sequence[Tool]) ->
 def get_declared_tools(messages: TranscriptMessages) -> List[Tool]:
     definitions: dict[str, Tool] = {}
     for message in messages:
-        if getattr(message, "role", None) != "system":
+        if not _is_system_message(message):
             continue
         for tool in message.tools_added or []:
             definitions[tool.name] = tool
@@ -185,7 +203,7 @@ def get_declared_tools(messages: TranscriptMessages) -> List[Tool]:
 def has_tool_redefinitions(messages: TranscriptMessages) -> bool:
     declared: dict[str, Tool] = {}
     for message in messages:
-        if getattr(message, "role", None) != "system":
+        if not _is_system_message(message):
             continue
         for tool in message.tools_added or []:
             previous = declared.get(tool.name)
@@ -198,7 +216,7 @@ def has_tool_redefinitions(messages: TranscriptMessages) -> bool:
 def has_non_additive_tool_changes(messages: TranscriptMessages) -> bool:
     declared: set[str] = set()
     for message in messages:
-        if getattr(message, "role", None) != "system":
+        if not _is_system_message(message):
             continue
         if len(message.tools_removed or []) > 0:
             return True
@@ -219,7 +237,7 @@ def resolve_transcript_tools(messages: TranscriptMessages, supports_tool_additio
     anchors_additions = supports_tool_additions and not has_non_additive_tool_changes(messages)
     if anchors_additions:
         initial = get_initial_system_message(messages)
-        request_tools = list(initial.tools_added) if initial and initial.tools_added else []
+        request_tools = initial.tools_added if initial is not None and initial.tools_added is not None else []
     else:
         request_tools = get_current_tools(messages)
     return TranscriptTools(request_tools=request_tools, anchors_additions=anchors_additions)
